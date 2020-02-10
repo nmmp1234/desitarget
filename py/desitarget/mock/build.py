@@ -71,9 +71,9 @@ def initialize_targets_truth(params, healpixels=None, nside=None, output_dir='.'
         raise ValueError
 
     if verbose:
-        log = get_logger(DEBUG)
+        log = get_logger(DEBUG, timestamp=True)
     else:
-        log = get_logger()
+        log = get_logger(timestamp=True)
     
     npix = len(np.atleast_1d(healpixels))
 
@@ -97,7 +97,7 @@ def initialize_targets_truth(params, healpixels=None, nside=None, output_dir='.'
     return log, healpixseeds
     
 def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
-              nside=None, nside_chunk=128, MakeMock=None, dndz=None):
+              nside=None, nside_chunk=128, MakeMock=None, dndz=None, sampling='gmm'):
     """Read a mock catalog.
     
     Parameters
@@ -173,7 +173,7 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
                          healpixels=healpixels, nside=nside,
                          magcut=magcut, nside_lya=nside_lya,
                          zmin_lya=zmin_lya, zmax_qso=zmax_qso,
-                         nside_galaxia=nside_galaxia, mock_density=mock_density)
+                         nside_galaxia=nside_galaxia, mock_density=mock_density, sampling=sampling)
     if not bool(data):
         return data, MakeMock
 
@@ -794,7 +794,7 @@ def get_contaminants_onepixel(params, healpix, nside, seed, nproc, log,
 
 def targets_truth(params, healpixels=None, nside=None, output_dir='.',
                   seed=None, nproc=1, nside_chunk=128, survey='main',
-                  verbose=False, no_spectra=False):
+                  verbose=False, no_spectra=False, sampling='gmm'):
     """Generate truth and targets catalogs, and noiseless spectra.
 
     Parameters
@@ -904,7 +904,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             data, MakeMock = read_mock(params['targets'][target_name], log, target_name,
                                        seed=healseed, healpixels=healpix,
                                        nside=nside, nside_chunk=nside_chunk,
-                                       MakeMock=AllMakeMock[ii], dndz=dndz)
+                                       MakeMock=AllMakeMock[ii], dndz=dndz, sampling=sampling)
             
             if not bool(data):
                 continue

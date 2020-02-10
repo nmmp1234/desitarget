@@ -22,6 +22,8 @@ from desimodel.io import load_pixweight
 from desimodel import footprint
 from desitarget import cuts
 from desisim.io import empty_metatable
+from functools import lru_cache
+
 
 from desiutil.log import get_logger, DEBUG
 log = get_logger()
@@ -31,6 +33,107 @@ try:
     C_LIGHT = constants.c/1000.0
 except TypeError: # This can happen during documentation builds.
     C_LIGHT = 299792458.0/1000.0
+
+def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', time='dark', hp=32):        
+    from   astropy.table      import Table, vstack
+    from   desitarget.targets import desi_mask, bgs_mask, mws_mask
+
+    
+    # E.g. /project/projectdirs/desi/target/catalogs/dr8/0.32.0/targets/main/resolve/bright/targets-dr8-hp-14.fits
+    fpath   = '/project/projectdirs/desi/target/catalogs/dr{}/{}/targets/{}/{}/{}/targets-dr{}-hp-{}.fits'.format(release, ver, main, resolve, time, release, str(hp))
+    
+    fits    = fitsio.FITS(fpath)
+    _       = fits[1].read()
+    cols    = fits[1].get_colnames()
+        
+    release = Table(_)
+
+    # Append colors.
+    gmag    = 22.5  - 2.5 * np.log10(release['FLUX_G']  / release['MW_TRANSMISSION_G'])
+    rmag    = 22.5  - 2.5 * np.log10(release['FLUX_R']  / release['MW_TRANSMISSION_R'])
+    zmag    = 22.5  - 2.5 * np.log10(release['FLUX_Z']  / release['MW_TRANSMISSION_Z'])
+    W1mag   = 22.5  - 2.5 * np.log10(release['FLUX_W1'] / release['MW_TRANSMISSION_W1'])
+    W2mag   = 22.5  - 2.5 * np.log10(release['FLUX_W2'] / release['MW_TRANSMISSION_W2'])
+
+    gr      = gmag  - rmag
+    rz      = rmag  - zmag
+    zW1     = zmag  - W1mag
+    W1W2    = W1mag - W2mag
+    
+    for col, key in zip([gr, rz, zW1, W1W2], ['GR', 'RZ', 'ZW1', 'W1W2']):
+        release[key] = col
+
+    # https://github.com/desihub/desitarget/blob/a64ed3adb1e38bbe23bf536e021153ada11bb8ac/doc/nb/target-selection-bits-and-bitmasks.ipynb
+    isBGS   = (release["DESI_TARGET"] & desi_mask["BGS_ANY"]) != 0 
+    isLRG   = (release["DESI_TARGET"] & desi_mask["LRG"])     != 0
+    isELG   = (release["DESI_TARGET"] & desi_mask["ELG"])     != 0
+    isQSO   = (release["DESI_TARGET"] & desi_mask["QSO"])     != 0
+    
+    release['SAMPLE']        = np.zeros(len(release['FLUX_G']), dtype='S4')
+    
+    release['SAMPLE'][isBGS] = b'BGS'
+    release['SAMPLE'][isLRG] = b'LRG'
+    release['SAMPLE'][isELG] = b'ELG'
+    release['SAMPLE'][isQSO] = b'QSO'
+
+    # Append MAG and MAGFILTER.
+    issouth = release['PHOTSYS'] == b'S'
+
+    release['MAG']           = np.zeros(len(release['FLUX_G']), dtype='f4') 
+    release['MAGFILTER']     = np.zeros(len(release['FLUX_G']), dtype='S15')
+
+    release['MAG'][isLRG  &  issouth] = zmag[isLRG  &  issouth]
+    release['MAG'][~isLRG &  issouth] = rmag[~isLRG &  issouth]
+
+    release['MAG'][isLRG  & ~issouth] = zmag[isLRG  & ~issouth]
+    release['MAG'][~isLRG & ~issouth] = rmag[~isLRG & ~issouth]
+
+    ##
+    release['MAGFILTER'][isLRG  &  issouth] = np.repeat('decam2014-z', np.count_nonzero( isLRG & issouth))
+    release['MAGFILTER'][~isLRG &  issouth] = np.repeat('decam2014-r', np.count_nonzero(~isLRG & issouth))
+
+    release['MAGFILTER'][isLRG  & ~issouth] = np.repeat('MzLS-z', np.count_nonzero( isLRG & ~issouth))
+    release['MAGFILTER'][~isLRG & ~issouth] = np.repeat('BASS-r', np.count_nonzero(~isLRG & ~issouth))
+
+    ##
+    tokeep = ('MAG', 'FRACDEV', 'FRACDEV_IVAR', 'SHAPEDEV_R', 'SHAPEDEV_R_IVAR', 'SHAPEDEV_E1',\
+              'SHAPEDEV_E1_IVAR', 'SHAPEDEV_E2', 'SHAPEDEV_E2_IVAR', 'SHAPEEXP_R', 'SHAPEEXP_R_IVAR',\
+              'SHAPEEXP_E1', 'SHAPEEXP_E1_IVAR', 'SHAPEEXP_E2', 'SHAPEEXP_E2_IVAR', 'GR', 'RZ', 'ZW1',\
+              'SAMPLE', 'W1W2', 'MAG', 'MAGFILTER')
+
+    for key in release.colnames:
+        if key not in tokeep:        
+            del  release[key]
+    
+    return  release
+
+@lru_cache(maxsize=1)
+def prep_release(npix=1, seed=0):
+    from   astropy.table import Table, vstack
+
+    cnt    = 0
+
+    hps    = np.arange(0, 40, 1)
+    rand   = np.random.RandomState(seed)
+
+    np.random.shuffle(hps)
+
+    hps    = np.array([25])  
+    
+    while cnt < npix:
+        if cnt == 0:
+            drelease = prep_releasepixel(hp = hps[cnt], time='dark')
+            brelease = prep_releasepixel(hp = hps[cnt], time='bright')
+
+            # ignore repeated tids across b and d time.
+            release  = vstack([drelease, brelease]) 
+            
+        else:            
+            release  = vstack([release, prep_releasepixel(hp = hps[cnt], time='dark'), prep_releasepixel(hp = hps[cnt], time='bright')])
+
+        cnt += 1
+            
+    return  release
 
 def empty_targets_table(nobj=1):
     """Initialize an empty 'targets' table.
@@ -549,6 +652,9 @@ class SelectTargets(object):
         See desitarget/doc/nb/gmm-dr7.ipynb for details.
 
         """
+
+        log.info('Sampling from {} Gaussian mixture model.'.format(target))
+        
         rand = np.random.RandomState(seed)
         
         try:
@@ -752,8 +858,35 @@ class SelectTargets(object):
             #dat['mag'] = gmmout['MAG']
             #srt = np.argsort(dat, order=('redshift', 'mag'))
 
+        # print('\n\n')
+        # print(target)
+        # print(gmmout)
+        
         return gmmout
 
+    def sample_release(self, nobj, isouth=None, target=None, morph=None,
+                       prior_mag=None, prior_redshift=None, seed=0):
+
+        log.info('Sampling from {} desitarget release.'.format(target))
+        
+        _       = prep_release()
+
+        # ignore north/south split.
+        isin    = _['SAMPLE'] == bytes(target, encoding='UTF=8')            
+        release = _[isin]
+        
+        choose  = np.random.choice(len(release), nobj)
+        
+        sample  = release[choose]
+
+        # Create dictionary.
+        result  = {}
+
+        for _ in sample.colnames:
+            result[_] = sample[_]
+
+        return  result
+        
     def KDTree_rescale(self, matrix, south=False, subtype=''):
         """Normalize input parameters to [0, 1]."""
         nobj, ndim = matrix.shape
@@ -1024,6 +1157,9 @@ class SelectTargets(object):
         targets['RA_IVAR'][:], targets['DEC_IVAR'][:] = 1e8, 1e8
         targets['DCHISQ'][:] = np.tile( [0.0, 100, 200, 300, 400], (nobj, 1)) # for QSO selection
 
+        # Assign REF_CAT:  chararray(['', 'G2', 'L2'], dtype='S2')
+        targets['REF_CAT'].data[:] = data['REF_CAT'][indx]
+        
         # Add dust, depth, and nobs.
         for band in ('G', 'R', 'Z', 'W1', 'W2', 'W3', 'W4'):
             key = 'MW_TRANSMISSION_{}'.format(band)
@@ -1254,7 +1390,7 @@ class ReadGaussianField(SelectTargets):
         
     def readmock(self, mockfile=None, healpixels=None, nside=None,
                  zmax_qso=None, target_name='', mock_density=False,
-                 only_coords=False, seed=None):
+                 only_coords=False, sampling='gmm', seed=None):
         """Read the catalog.
 
         Parameters
@@ -1316,7 +1452,7 @@ class ReadGaussianField(SelectTargets):
         if nside is None:
             log.warning('Nside must be a scalar input.')
             raise ValueError
-
+        
         # Read the ra,dec coordinates, pixel weight map, generate mockid, and
         # then restrict to the desired healpixels.
         if self.cached_radec is None:
@@ -1382,13 +1518,17 @@ class ReadGaussianField(SelectTargets):
                     'WEIGHT': weight, 'NSIDE': nside}
 
         isouth = self.is_south(dec)
-
+        
+        # ref cat.                                                                                                                                                                                                   
+        refcat = np.array([b'  '] * len(ra), dtype='S2')
+        
         # Get photometry and morphologies by sampling from the Gaussian
         # mixture models.
-        log.info('Sampling from {} Gaussian mixture model.'.format(target_name))
-        gmmout = self.sample_GMM(nobj, target=target_name, isouth=isouth,
-                                 seed=seed, prior_redshift=zz)
 
+        _sampling = {'release': self.sample_release, 'gmm': self.sample_GMM}
+
+        gmmout    = _sampling[sampling](nobj, target=target_name, isouth=isouth, seed=seed)
+        
         # For ELGs, also sample to get the [OII] flux for use with --no-spectra.
         # Note that these are the "true" values (before photometric scatter and
         # Galactic extinction).
@@ -1463,7 +1603,7 @@ class ReadGaussianField(SelectTargets):
                'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
                'BRICKID': self.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'Z_NORSD': zz_norsd,
-               'SOUTH': isouth}
+               'SOUTH': isouth, 'REF_CAT': refcat}
         if gmmout is not None:
             out.update(gmmout)
 
@@ -1639,6 +1779,9 @@ class ReadBuzzard(SelectTargets):
 
         isouth = self.is_south(dec)
 
+        # recat.
+        refcat = np.array([b'  '] * len(ra), dtype='S2')
+        
         ## Get photometry and morphologies by sampling from the Gaussian
         ## mixture models.
         #log.info('Sampling from {} Gaussian mixture model.'.format(target_name))
@@ -1659,7 +1802,7 @@ class ReadBuzzard(SelectTargets):
             'MAG': rmag, 'MAGFILTER': np.repeat('decam2014-r', nobj),
             #'GMAG': gmag, 'MAGFILTER-G': np.repeat('decam2014-g', nobj),
             'ZMAG': zmag, 'MAGFILTER-Z': np.repeat('decam2014-z', nobj),
-            'SOUTH': isouth}
+               'SOUTH': isouth, 'REF_CAT': refcat}
             
         #if gmmout is not None:
         #    out.update(gmmout)
@@ -1782,13 +1925,16 @@ class ReadUniformSky(SelectTargets):
 
         isouth = self.is_south(dec)
 
+        #ref cat.
+        refcat = np.array([b'  '] * len(ra), dtype='S2')
+        
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'uniformsky',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
                'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
                'BRICKID': self.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': np.zeros(len(ra)),
-               'SOUTH': isouth}
+               'SOUTH': isouth, 'REF_CAT': refcat}
 
         # Add MW transmission and the imaging depth.
         self.mw_transmission(out)
@@ -2251,6 +2397,9 @@ class ReadLyaCoLoRe(SelectTargets):
                 mockdir, mpix//100, mpix, nside_lya, mpix))
         isouth = self.is_south(dec)
 
+        # ref cat
+        refcat = np.array([b'  '] * len(ra), dtype='S2')
+        
         # Draw apparent magnitudes from an BOSS/DR9 QSO luminosity function
         # (code taken from also desisim.templates.SIMQSO).
         #
@@ -2287,9 +2436,12 @@ class ReadLyaCoLoRe(SelectTargets):
                                                 gridseed=seed)
                     mag[these] = qsometa.data['appMag']
                     magfilter[these] = normfilter_south
+
+
+                    
         # Get photometry and morphologies by sampling from the Gaussian
         # mixture models.
-        log.info('Sampling from {} Gaussian mixture model.'.format(target_name))
+
         gmmout = self.sample_GMM(nobj, target='QSO', isouth=isouth,
                                  seed=seed, prior_redshift=zz, prior_mag=mag)
 
@@ -2302,7 +2454,7 @@ class ReadLyaCoLoRe(SelectTargets):
                'BRICKID': self.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'Z_NORSD': zz_norsd,
                'MAG': mag, 'MAGFILTER': magfilter,
-               'SOUTH': isouth}
+               'SOUTH': isouth, 'REF_CAT': refcat}
         if gmmout is not None:
             out.update(gmmout)
 
@@ -2325,7 +2477,7 @@ class ReadMXXL(SelectTargets):
 
     def readmock(self, mockfile=None, healpixels=None, nside=None,
                  target_name='BGS', magcut=None, only_coords=False,
-                 mock_density=False, seed=None):
+                 mock_density=False, seed=None, sampling='gmm'):
         """Read the catalog.
 
         Parameters
@@ -2389,7 +2541,7 @@ class ReadMXXL(SelectTargets):
         if nside is None:
             log.warning('Nside must be a scalar input.')
             raise ValueError
-
+        
         # Read the data, generate mockid, and then restrict to the input
         # healpixel.
         def _read_mockfile(mockfile, nside, pixmap):
@@ -2482,13 +2634,17 @@ class ReadMXXL(SelectTargets):
 
         isouth = self.is_south(dec)
 
+        # ref cat.
+        refcat = np.array([b'  '] * len(ra), dtype='S2')
+        
         # Get photometry and morphologies by sampling from the Gaussian mixture
         # models.  This is a total hack because our apparent magnitudes (rmag)
         # will not be consistent with the Gaussian draws.  But as a hack just
         # sort the shapes and sizes on rmag.
-        log.info('Sampling from {} Gaussian mixture model.'.format(target_name))
-        gmmout = self.sample_GMM(nobj, target=target_name, isouth=isouth,
-                                 seed=seed, prior_mag=rmag)
+        _sampling = {'release': self.sample_release, 'gmm': self.sample_GMM}
+
+        gmmout    = _sampling[sampling](nobj, target=target_name, isouth=isouth,
+                                        seed=seed, prior_mag=rmag)
 
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'durham_mxxl_hdf5',
@@ -2497,7 +2653,7 @@ class ReadMXXL(SelectTargets):
                'BRICKID': self.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'MAG': rmag, 'SDSS_absmag_r01': absmag,
                'SDSS_01gr': gr, 'MAGFILTER': np.repeat('sdss2010-r', nobj),
-               'SOUTH': isouth}
+               'SOUTH': isouth, 'REF_CAT': refcat}
 
         if gmmout is not None:
             out.update(gmmout)
@@ -3813,7 +3969,7 @@ class ELGMaker(SelectTargets):
             self.read_GMM(target='ELG')
 
     def read(self, mockfile=None, mockformat='gaussianfield', healpixels=None,
-             nside=None, only_coords=False, mock_density=False, **kwargs):
+             nside=None, only_coords=False, mock_density=False, sampling='gmm', **kwargs):
         """Read the catalog.
 
         Parameters
@@ -3857,7 +4013,7 @@ class ELGMaker(SelectTargets):
         data = MockReader.readmock(mockfile, target_name=self.objtype,
                                    healpixels=healpixels, nside=nside,
                                    only_coords=only_coords,
-                                   mock_density=mock_density, seed=self.seed)
+                                   mock_density=mock_density, sampling=sampling, seed=self.seed)
 
         return data
             
@@ -4017,7 +4173,7 @@ class BGSMaker(SelectTargets):
             self.read_GMM(target='BGS')
 
     def read(self, mockfile=None, mockformat='durham_mxxl_hdf5', healpixels=None,
-             nside=None, magcut=None, only_coords=False, mock_density=False, **kwargs):
+             nside=None, magcut=None, only_coords=False, mock_density=False, sampling='gmm', **kwargs):
         """Read the catalog.
 
         Parameters
@@ -4180,14 +4336,15 @@ class BGSMaker(SelectTargets):
             Corresponding truth table.
 
         """
+        
         desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=targetname,
                                                               survey=self.survey)
         
         self.remove_north_south_bits(desi_target, bgs_target, mws_target)
         
         targets['DESI_TARGET'] |= desi_target
-        targets['BGS_TARGET'] |= bgs_target
-        targets['MWS_TARGET'] |= mws_target
+        targets['BGS_TARGET']  |= bgs_target
+        targets['MWS_TARGET']  |= mws_target
         
 class STARMaker(SelectTargets):
     """Lower-level Class for preparing for stellar spectra to be generated,

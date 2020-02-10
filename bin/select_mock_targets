@@ -33,13 +33,14 @@ parser.add_argument('--join', action='store_true', help='Join the target and tru
 parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose output.')
 parser.add_argument('--no-spectra', action='store_true', help='Do not generate spectra.')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files.')
+parser.add_argument('--sampling', default='gmm', help='Sampling style for target color and morphology; [release, gmm]')
 
 args = parser.parse_args()
 
 if args.verbose:
-    log = get_logger(DEBUG)
+    log = get_logger(DEBUG, timestamp=True)
 else:
-    log = get_logger()
+    log = get_logger(timestamp=True)
 
 log.info('Starting select_mock_targets at {}'.format(time.asctime()))
 
@@ -99,6 +100,6 @@ with open(args.config, 'r') as pfile:
 log.info('Calling targets_truth with survey={} at {}'.format(args.survey, time.asctime()))
 targets_truth(params, healpixels=healpixels, nside=args.nside, seed=args.seed, 
               output_dir=args.output_dir, nproc=args.nproc, verbose=args.verbose,
-              no_spectra=args.no_spectra, survey=args.survey)
+              no_spectra=args.no_spectra, survey=args.survey, sampling=args.sampling)
 log.info('All done at {}'.format(time.asctime()))
 

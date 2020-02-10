@@ -1105,7 +1105,9 @@ def isBGS_lslga(gflux=None, rflux=None, zflux=None, w1flux=None, refcat=None,
     """
     _check_BGS_targtype(targtype)
     
-    bgs = np.zeros_like(rflux, dtype='?')
+    bgs    = np.zeros_like(rflux, dtype='?')
+
+    refcat = [x.replace('', '  ') for x in refcat]
     
     #the LSLGA galaxies
     if refcat is None:
