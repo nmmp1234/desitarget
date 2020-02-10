@@ -53,15 +53,15 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
     release = Table(_)
 
     # Append colors.
-    gmag    = 22.5  - 2.5 * np.log10(release['FLUX_G']  / release['MW_TRANSMISSION_G'])
-    rmag    = 22.5  - 2.5 * np.log10(release['FLUX_R']  / release['MW_TRANSMISSION_R'])
-    zmag    = 22.5  - 2.5 * np.log10(release['FLUX_Z']  / release['MW_TRANSMISSION_Z'])
-    W1mag   = 22.5  - 2.5 * np.log10(release['FLUX_W1'] / release['MW_TRANSMISSION_W1'])
-    W2mag   = 22.5  - 2.5 * np.log10(release['FLUX_W2'] / release['MW_TRANSMISSION_W2'])
+    gmag    = 22.5 - 2.5 * np.log10(release['FLUX_G']  / release['MW_TRANSMISSION_G'])
+    rmag    = 22.5 - 2.5 * np.log10(release['FLUX_R']  / release['MW_TRANSMISSION_R'])
+    zmag    = 22.5 - 2.5 * np.log10(release['FLUX_Z']  / release['MW_TRANSMISSION_Z'])
+    W1mag   = 22.5 - 2.5 * np.log10(release['FLUX_W1'] / release['MW_TRANSMISSION_W1'])
+    W2mag   = 22.5 - 2.5 * np.log10(release['FLUX_W2'] / release['MW_TRANSMISSION_W2'])
 
-    gr      = gmag  - rmag
-    rz      = rmag  - zmag
-    zW1     = zmag  - W1mag
+    gr      = gmag - rmag
+    rz      = rmag - zmag
+    zW1     = zmag - W1mag
     W1W2    = W1mag - W2mag
     
     for col, key in zip([gr, rz, zW1, W1W2], ['GR', 'RZ', 'ZW1', 'W1W2']):
@@ -101,6 +101,9 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
 
     release['TYPE'] = release['MORPHTYPE']
 
+    del  release['RA']
+    del  release['DEC']
+    
     # for key in release.colnames:
     #    if key not in tokeep:        
     #        del  release[key]
@@ -1104,7 +1107,7 @@ class SelectTargets(object):
          
     def populate_targets_truth(self, flux, data, meta, objmeta, indx=None,
                                seed=None, use_simqso=True, truespectype='',
-                               templatetype='', templatesubtype=''):
+                               templatetype='', templatesubtype='', maskbits=False):
         """Initialize and populate the targets and truth tables given a dictionary of
         source properties and a spectral metadata table.  
 
@@ -1150,10 +1153,7 @@ class SelectTargets(object):
         truth, objtruth     = empty_truth_table(nobj, templatetype=templatetype,
                                                 use_simqso=use_simqso)
 
-        # Populate CCD criteria.
-        targets             = self._maskbits(targets)
-
-        truth['MOCKID'][:] = data['MOCKID'][indx]
+        truth['MOCKID'][:]  = data['MOCKID'][indx]
 
         if len(objtruth) > 0:
             if 'Z_NORSD' in data.keys() and 'TRUEZ_NORSD' in objtruth.colnames:
@@ -1168,7 +1168,10 @@ class SelectTargets(object):
                     targets[key].data[:] = data[key][indx]
                 else:
                     targets[key].data[:] = np.repeat(data[key], nobj)
-        
+
+        if maskbits:
+          targets           = self._maskbits(targets)
+                    
         # Assign RELEASE, PHOTSYS, [RA,DEC]_IVAR, and DCHISQ
         targets['RELEASE'][:] = 9999
 
@@ -1630,7 +1633,12 @@ class ReadGaussianField(SelectTargets):
                'BRICKID': self.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'Z_NORSD': zz_norsd,
                'SOUTH': isouth, 'REF_CAT': refcat}
+
         if gmmout is not None:
+            # Wipe anything in danger of overwrite.
+            for _ in out.keys():
+              del  gmmout[key]
+
             out.update(gmmout)
 
         # Add MW transmission and the imaging depth.
@@ -2671,7 +2679,7 @@ class ReadMXXL(SelectTargets):
 
         gmmout    = _sampling[sampling](nobj, target=target_name, isouth=isouth,
                                         seed=seed, prior_mag=rmag)
-
+        
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'durham_mxxl_hdf5',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
@@ -2682,6 +2690,13 @@ class ReadMXXL(SelectTargets):
                'SOUTH': isouth, 'REF_CAT': refcat}
 
         if gmmout is not None:
+            for key in out.keys():
+              try:
+                del  gmmout[key]
+
+              except:
+                continue
+
             out.update(gmmout)
 
         # Add MW transmission and the imaging depth.
