@@ -225,7 +225,7 @@ def _pre_or_post_dr8(drdir):
 
 
 def dr8_quantities_at_positions_in_a_brick(ras, decs, brickname, drdir,
-                                           aprad=0.75):
+                                           aprad=0.75, force=False):
     """Wrap `quantities_at_positions_in_a_brick` for DR8 and beyond.
 
     Notes
@@ -243,7 +243,7 @@ def dr8_quantities_at_positions_in_a_brick(ras, decs, brickname, drdir,
     qall = []
     for dd in drdirs:
         q = quantities_at_positions_in_a_brick(ras, decs, brickname, dd,
-                                               aprad=aprad)
+                                               aprad=aprad, force=force)
         # ADM don't count bricks where we never read a file header.
         if q is not None:
             qall.append(q)
@@ -261,7 +261,7 @@ def dr8_quantities_at_positions_in_a_brick(ras, decs, brickname, drdir,
 
 
 def quantities_at_positions_in_a_brick(ras, decs, brickname, drdir,
-                                       aprad=0.75):
+                                       aprad=0.75, force=False):
     """Observational quantities (per-band) at positions in a Legacy Surveys brick.
 
     Parameters
@@ -296,10 +296,17 @@ def quantities_at_positions_in_a_brick(ras, decs, brickname, drdir,
     npts = len(ras)
     if npts == 0:
         msg = 'brick {} is empty. Increase the density of random points!'.format(brickname)
-        log.critical(msg)
-        raise ValueError(msg)
+        
+        if force:
+          log.warning(msg)
 
-    # ADM determine whether the coadd files have extension .gz or .fz based on the DR directory.
+          return  None
+
+        else:
+          log.critical(msg)
+            
+          raise ValueError(msg)
+
     extn, extn_nb = dr_extension(drdir)
 
     # ADM the output dictionary.

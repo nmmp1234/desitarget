@@ -18,12 +18,16 @@ from pkg_resources import resource_filename
 import fitsio
 import healpy as hp
 
+from desiutil import brick
 from desimodel.io import load_pixweight
 from desimodel import footprint
 from desitarget import cuts
 from desisim.io import empty_metatable
 from functools import lru_cache
-
+from astropy.table import Table, vstack, Column
+from desitarget import randoms
+from desitarget.randoms import dr8_quantities_at_positions_in_a_brick
+from get_maskbits import maskbit_at_positions_in_a_brick
 
 from desiutil.log import get_logger, DEBUG
 log = get_logger(timestamp=True)
@@ -95,15 +99,11 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
     release['MAGFILTER'][isLRG  & ~issouth] = np.repeat('MzLS-z', np.count_nonzero( isLRG & ~issouth))
     release['MAGFILTER'][~isLRG & ~issouth] = np.repeat('BASS-r', np.count_nonzero(~isLRG & ~issouth))
 
-    ##
-    tokeep = ('MAG', 'FRACDEV', 'FRACDEV_IVAR', 'SHAPEDEV_R', 'SHAPEDEV_R_IVAR', 'SHAPEDEV_E1',\
-              'SHAPEDEV_E1_IVAR', 'SHAPEDEV_E2', 'SHAPEDEV_E2_IVAR', 'SHAPEEXP_R', 'SHAPEEXP_R_IVAR',\
-              'SHAPEEXP_E1', 'SHAPEEXP_E1_IVAR', 'SHAPEEXP_E2', 'SHAPEEXP_E2_IVAR', 'GR', 'RZ', 'ZW1',\
-              'SAMPLE', 'W1W2', 'MAG', 'MAGFILTER')
+    release['TYPE'] = release['MORPHTYPE']
 
-    for key in release.colnames:
-        if key not in tokeep:        
-            del  release[key]
+    # for key in release.colnames:
+    #    if key not in tokeep:        
+    #        del  release[key]
     
     return  release
 
@@ -111,14 +111,13 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
 def prep_release(npix=1, seed=0):
     from   astropy.table import Table, vstack
 
+    
     cnt    = 0
 
     hps    = np.arange(0, 40, 1)
     rand   = np.random.RandomState(seed)
 
     np.random.shuffle(hps)
-
-    hps    = np.array([25])  
     
     while cnt < npix:
         if cnt == 0:
@@ -132,7 +131,7 @@ def prep_release(npix=1, seed=0):
             release  = vstack([release, prep_releasepixel(hp = hps[cnt], time='dark'), prep_releasepixel(hp = hps[cnt], time='bright')])
 
         cnt += 1
-            
+        
     return  release
 
 def empty_targets_table(nobj=1):
@@ -884,7 +883,7 @@ class SelectTargets(object):
 
         for _ in sample.colnames:
             result[_] = sample[_]
-
+            
         return  result
         
     def KDTree_rescale(self, matrix, south=False, subtype=''):
@@ -1079,7 +1078,30 @@ class SelectTargets(object):
                 fiberfraction[zero] = 0.05
 
         return fiberfraction_g, fiberfraction_r, fiberfraction_z
+    
+    def _maskbits(self, targets, release=8, nproc=1):
+      bricks      = brick.Bricks(bricksize=0.25)
 
+      bricknames  = bricks.brickname(targets['RA'], targets['DEC'])
+
+      ubricknames = np.unique(bricknames)
+
+      drdir       = '/global/project/projectdirs/cosmo/data/legacysurvey/dr{}'.format(release)
+
+      drdirs      = randoms._pre_or_post_dr8(drdir)
+      dr_dic      = {'south': drdir + 'south/', 'north': drdir + 'north/'}
+
+      for _ in ubricknames:
+          indx    = targets['BRICKNAME'] == _
+
+          if len(indx) > 0:
+            rtn   = dr8_quantities_at_positions_in_a_brick(targets['RA'][indx], targets['DEC'][indx], _, drdir, aprad=0.75, force=True)
+
+            for key in rtn.keys():            
+              targets[key][indx] = rtn[key]
+      
+      return  targets 
+         
     def populate_targets_truth(self, flux, data, meta, objmeta, indx=None,
                                seed=None, use_simqso=True, truespectype='',
                                templatetype='', templatesubtype=''):
@@ -1124,25 +1146,29 @@ class SelectTargets(object):
         nobj = len(indx)
 
         # Initialize the tables.
-        targets = empty_targets_table(nobj)
-        truth, objtruth = empty_truth_table(nobj, templatetype=templatetype,
-                                            use_simqso=use_simqso)
+        targets             = empty_targets_table(nobj)
+        truth, objtruth     = empty_truth_table(nobj, templatetype=templatetype,
+                                                use_simqso=use_simqso)
+
+        # Populate CCD criteria.
+        targets             = self._maskbits(targets)
 
         truth['MOCKID'][:] = data['MOCKID'][indx]
+
         if len(objtruth) > 0:
             if 'Z_NORSD' in data.keys() and 'TRUEZ_NORSD' in objtruth.colnames:
                 objtruth['TRUEZ_NORSD'][:] = data['Z_NORSD'][indx]
             if 'OIIFLUX' in data.keys() and 'OIIFLUX' in objtruth.colnames: # ELGs
                 objtruth['OIIFLUX'][:] = data['OIIFLUX'][indx]
-
+                
         # Copy all information from DATA to TARGETS.
         for key in data.keys():
             if key in targets.colnames:
                 if isinstance(data[key], np.ndarray):
-                    targets[key][:] = data[key][indx]
+                    targets[key].data[:] = data[key][indx]
                 else:
-                    targets[key][:] = np.repeat(data[key], nobj)
-
+                    targets[key].data[:] = np.repeat(data[key], nobj)
+        
         # Assign RELEASE, PHOTSYS, [RA,DEC]_IVAR, and DCHISQ
         targets['RELEASE'][:] = 9999
 
@@ -1176,9 +1202,9 @@ class SelectTargets(object):
         for value, key in zip( (truespectype, templatetype, templatesubtype),
                                ('TRUESPECTYPE', 'TEMPLATETYPE', 'TEMPLATESUBTYPE') ):
             if isinstance(value, np.ndarray):
-                truth[key][:] = value
+                truth[key].data[:] = value
             else:
-                truth[key][:] = np.repeat(value, nobj)
+                truth[key].data[:] = np.repeat(value, nobj)
 
         # Copy various quantities from the metadata table.
         for key in meta.colnames:
@@ -3312,7 +3338,7 @@ class QSOMaker(SelectTargets):
             qso_selection = 'colorcuts'
             
         if self.use_simqso:
-            desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=targetname,
+            desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=[targetname],
                                                                   qso_selection=qso_selection,
                                                                   survey=self.survey)
         else:
@@ -3323,8 +3349,8 @@ class QSOMaker(SelectTargets):
         self.remove_north_south_bits(desi_target, bgs_target, mws_target)
 
         targets['DESI_TARGET'] |= desi_target
-        targets['BGS_TARGET'] |= bgs_target
-        targets['MWS_TARGET'] |= mws_target
+        targets['BGS_TARGET']  |= bgs_target
+        targets['MWS_TARGET']  |= mws_target
 
 class LYAMaker(SelectTargets):
     """Read LYA mocks, generate spectra, and select targets.
@@ -3746,7 +3772,7 @@ class LRGMaker(SelectTargets):
             self.read_GMM(target='LRG')
 
     def read(self, mockfile=None, mockformat='gaussianfield', healpixels=None,
-             nside=None, only_coords=False, mock_density=False, **kwargs):
+             nside=None, only_coords=False, mock_density=False, sampling='gmm', **kwargs):
         """Read the catalog.
 
         Parameters
@@ -3790,7 +3816,8 @@ class LRGMaker(SelectTargets):
         data = MockReader.readmock(mockfile, target_name=self.objtype,
                                    healpixels=healpixels, nside=nside,
                                    only_coords=only_coords,
-                                   mock_density=mock_density, seed=self.seed)
+                                   mock_density=mock_density, seed=self.seed,
+                                   sampling=sampling)
 
         return data
 
@@ -3900,8 +3927,8 @@ class LRGMaker(SelectTargets):
         self.remove_north_south_bits(desi_target, bgs_target, mws_target)
         
         targets['DESI_TARGET'] |= desi_target
-        targets['BGS_TARGET'] |= bgs_target
-        targets['MWS_TARGET'] |= mws_target
+        targets['BGS_TARGET']  |= bgs_target
+        targets['MWS_TARGET']  |= mws_target
 
 class ELGMaker(SelectTargets):
     """Read ELG mocks, generate spectra, and select targets.
@@ -4116,14 +4143,14 @@ class ELGMaker(SelectTargets):
             Target selection cuts to apply.
 
         """
-        desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=targetname,
+        desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=[targetname],
                                                               survey=self.survey)
         
         self.remove_north_south_bits(desi_target, bgs_target, mws_target)
         
         targets['DESI_TARGET'] |= desi_target
-        targets['BGS_TARGET'] |= bgs_target
-        targets['MWS_TARGET'] |= mws_target
+        targets['BGS_TARGET']  |= bgs_target
+        targets['MWS_TARGET']  |= mws_target
 
 class BGSMaker(SelectTargets):
     """Read BGS mocks, generate spectra, and select targets.
@@ -4338,7 +4365,7 @@ class BGSMaker(SelectTargets):
 
         """
         
-        desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=targetname,
+        desi_target, bgs_target, mws_target = cuts.apply_cuts(targets, tcnames=[targetname],
                                                               survey=self.survey)
         
         self.remove_north_south_bits(desi_target, bgs_target, mws_target)

@@ -989,7 +989,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
         else:
             log.info('No SKY targets generated; {} not written.'.format(skyfile))
             log.info('  Sky file {} not written.'.format(skyfile))
-            
+    
 def finish_catalog(targets, truth, objtruth, skytargets, skytruth, healpix,
                    nside, log, seed=None, survey='main'):
     """Add various mission-critical columns to the target catalog, including
