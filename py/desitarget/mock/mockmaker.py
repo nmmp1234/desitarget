@@ -26,7 +26,7 @@ from functools import lru_cache
 
 
 from desiutil.log import get_logger, DEBUG
-log = get_logger()
+log = get_logger(timestamp=True)
 
 try:
     from scipy import constants
