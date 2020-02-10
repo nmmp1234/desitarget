@@ -69,8 +69,11 @@ if args.healpixels is None:
         log.info('{} tiles'.format(len(tiles)))
     else:
         tiles = None
-        log.info('Running on the full DESI footprint')
+
     healpixels = desimodel.footprint.tiles2pix(args.nside, tiles)
+
+    log.info('Running on the full DESI footprint ({} healpixels).'.format(len(healpixels)))
+
 else:    
     healpixels = np.array(args.healpixels, dtype=np.int)
     

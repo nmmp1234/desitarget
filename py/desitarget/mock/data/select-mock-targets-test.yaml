@@ -1,0 +1,8 @@
+# Parameter file for desitarget/bin/select_mock_targets, including contaminants.
+targets:
+    BGS: {
+        target_type: BGS,
+        mockfile: '{DESI_ROOT}/mocks/bgs/MXXL/full_sky/v0.0.4/BGS_r20.6.hdf5',
+        format: durham_mxxl_hdf5,
+        magcut: 20.3,
+    }
