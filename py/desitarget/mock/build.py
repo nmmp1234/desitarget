@@ -174,7 +174,6 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
                          magcut=magcut, nside_lya=nside_lya,
                          zmin_lya=zmin_lya, zmax_qso=zmax_qso,
                          nside_galaxia=nside_galaxia, mock_density=mock_density, sampling=sampling)
-
     
     log.info('Finished reading Target: {}, type: {}, format: {}, mockfile: {}'.format(
         target_name, target_type, mockformat, mockfile))
@@ -197,8 +196,8 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
         # densities here by the appropriate ratio given by the desired redshift
         # distribution.
         if target_type == 'QSO' and target_type in dndz.keys():
-            zbins = np.arange(0, 5, 0.1)
-            qsodndz = np.interp(zbins, dndz[target_type]['z'], dndz[target_type]['dndz'], left=0, right=0)
+            zbins    = np.arange(0, 5, 0.1)
+            qsodndz  = np.interp(zbins, dndz[target_type]['z'], dndz[target_type]['dndz'], left=0, right=0)
             qsodndz *= np.sum(dndz[target_type]['dndz']) / np.sum(qsodndz)
 
             if target_name == 'QSO' and 'zmax_qso' in params.keys():
@@ -218,6 +217,7 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
 
         log.info('Computed median mock density for {}s of {:.2f} targets/deg2.'.format(
             target_name, data['MOCK_DENSITY']))
+
         log.info('Target density = {:.2f} targets/deg2 (downsampling factor = {:.3f}).'.format(
             data['DENSITY'], data['DENSITY_FACTOR']))
     else:
@@ -287,6 +287,7 @@ def get_spectra_onepixel(data, indx, MakeMock, seed, log, ntarget,
     iterindx = np.array_split(indx, maxiter)
 
     makemore, itercount, ntot = True, 0, 0
+
     while makemore:
         chunkflux, _, chunktargets, chunktruth, chunkobjtruth = MakeMock.make_spectra(
             data, indx=iterindx[itercount], seed=iterseeds[itercount], no_spectra=no_spectra)
@@ -294,10 +295,9 @@ def get_spectra_onepixel(data, indx, MakeMock, seed, log, ntarget,
         MakeMock.select_targets(chunktargets, chunktruth, targetname=data['TARGET_NAME'])
         
         keep = np.where(chunktargets['DESI_TARGET'] != 0)[0]
-        #if 'CONTAM_NAME' in data.keys():
-        #    import pdb ; pdb.set_trace()
-
+     
         nkeep = len(keep)
+
         if nkeep > 0:
             ntot += nkeep
             log.debug('Generated {} / {} ({} / {} total) {} targets on iteration {} / {}.'.format(
@@ -310,11 +310,13 @@ def get_spectra_onepixel(data, indx, MakeMock, seed, log, ntarget,
                 trueflux.append(chunkflux[keep, :])
 
         itercount += 1
+
         if itercount == maxiter or ntot >= ntarget:
             if maxiter > 1:
                 log.debug('Generated {} / {} {} targets after {} iterations.'.format(
                     ntot, ntarget, targname, itercount))
             makemore = False
+
         else:
             need = np.where(chunktargets['DESI_TARGET'] == 0)[0]
 
@@ -934,6 +936,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             if sky:
                 allskytargets.append(targets)
                 allskytruth.append(truth)
+
             else:
                 if len(targets) > 0:
                     alltargets.append(targets)
@@ -1001,7 +1004,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
         else:
             log.info('No SKY targets generated; {} not written.'.format(skyfile))
             log.info('  Sky file {} not written.'.format(skyfile))
-    
+            
 def finish_catalog(targets, truth, objtruth, skytargets, skytruth, healpix,
                    nside, log, seed=None, survey='main'):
     """Add various mission-critical columns to the target catalog, including
