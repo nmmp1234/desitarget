@@ -156,6 +156,105 @@ def prep_release(npix=1, seed=0):
         
     return  release
 
+def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', time='dark', hp=32):        
+    from   astropy.table      import Table, vstack
+    from   desitarget.targets import desi_mask, bgs_mask, mws_mask
+
+    
+    # E.g. /project/projectdirs/desi/target/catalogs/dr8/0.32.0/targets/main/resolve/bright/targets-dr8-hp-14.fits
+    fpath   = '/project/projectdirs/desi/target/catalogs/dr{}/{}/targets/{}/{}/{}/targets-dr{}-hp-{}.fits'.format(release, ver, main, resolve, time, release, str(hp))
+    
+    fits    = fitsio.FITS(fpath)
+    _       = fits[1].read()
+    cols    = fits[1].get_colnames()
+        
+    release = Table(_)
+
+    # Append colors.
+    gmag    = 22.5 - 2.5 * np.log10(release['FLUX_G']  / release['MW_TRANSMISSION_G'])
+    rmag    = 22.5 - 2.5 * np.log10(release['FLUX_R']  / release['MW_TRANSMISSION_R'])
+    zmag    = 22.5 - 2.5 * np.log10(release['FLUX_Z']  / release['MW_TRANSMISSION_Z'])
+    W1mag   = 22.5 - 2.5 * np.log10(release['FLUX_W1'] / release['MW_TRANSMISSION_W1'])
+    W2mag   = 22.5 - 2.5 * np.log10(release['FLUX_W2'] / release['MW_TRANSMISSION_W2'])
+
+    gr      = gmag - rmag
+    rz      = rmag - zmag
+    zW1     = zmag - W1mag
+    W1W2    = W1mag - W2mag
+    
+    for col, key in zip([gr, rz, zW1, W1W2], ['GR', 'RZ', 'ZW1', 'W1W2']):
+        release[key] = col
+
+    # https://github.com/desihub/desitarget/blob/a64ed3adb1e38bbe23bf536e021153ada11bb8ac/doc/nb/target-selection-bits-and-bitmasks.ipynb
+    isBGS   = (release["DESI_TARGET"] & desi_mask["BGS_ANY"]) != 0 
+    isLRG   = (release["DESI_TARGET"] & desi_mask["LRG"])     != 0
+    isELG   = (release["DESI_TARGET"] & desi_mask["ELG"])     != 0
+    isQSO   = (release["DESI_TARGET"] & desi_mask["QSO"])     != 0
+    
+    release['SAMPLE']        = np.zeros(len(release['FLUX_G']), dtype='S4')
+    
+    release['SAMPLE'][isBGS] = b'BGS'
+    release['SAMPLE'][isLRG] = b'LRG'
+    release['SAMPLE'][isELG] = b'ELG'
+    release['SAMPLE'][isQSO] = b'QSO'
+
+    # Append MAG and MAGFILTER.
+    issouth = release['PHOTSYS'] == b'S'
+
+    release['MAG']           = np.zeros(len(release['FLUX_G']), dtype='f4') 
+    release['MAGFILTER']     = np.zeros(len(release['FLUX_G']), dtype='S15')
+
+    release['MAG'][isLRG  &  issouth] = zmag[isLRG  &  issouth]
+    release['MAG'][~isLRG &  issouth] = rmag[~isLRG &  issouth]
+
+    release['MAG'][isLRG  & ~issouth] = zmag[isLRG  & ~issouth]
+    release['MAG'][~isLRG & ~issouth] = rmag[~isLRG & ~issouth]
+
+    ##
+    release['MAGFILTER'][isLRG  &  issouth] = np.repeat('decam2014-z', np.count_nonzero( isLRG & issouth))
+    release['MAGFILTER'][~isLRG &  issouth] = np.repeat('decam2014-r', np.count_nonzero(~isLRG & issouth))
+
+    release['MAGFILTER'][isLRG  & ~issouth] = np.repeat('MzLS-z', np.count_nonzero( isLRG & ~issouth))
+    release['MAGFILTER'][~isLRG & ~issouth] = np.repeat('BASS-r', np.count_nonzero(~isLRG & ~issouth))
+
+    release['TYPE'] = release['MORPHTYPE']
+
+    del  release['RA']
+    del  release['DEC']
+    
+    # for key in release.colnames:
+    #    if key not in tokeep:        
+    #        del  release[key]
+    
+    return  release
+
+@lru_cache(maxsize=1)
+def prep_release(npix=1, seed=0):
+    from   astropy.table import Table, vstack
+
+    
+    cnt    = 0
+
+    hps    = np.arange(0, 40, 1)
+    rand   = np.random.RandomState(seed)
+
+    np.random.shuffle(hps)
+    
+    while cnt < npix:
+        if cnt == 0:
+            drelease = prep_releasepixel(hp = hps[cnt], time='dark')
+            brelease = prep_releasepixel(hp = hps[cnt], time='bright')
+
+            # ignore repeated tids across b and d time.
+            release  = vstack([drelease, brelease]) 
+            
+        else:            
+            release  = vstack([release, prep_releasepixel(hp = hps[cnt], time='dark'), prep_releasepixel(hp = hps[cnt], time='bright')])
+
+        cnt += 1
+        
+    return  release
+
 def empty_targets_table(nobj=1):
     """Initialize an empty 'targets' table.
 
@@ -3812,6 +3911,7 @@ class LRGMaker(SelectTargets):
 
             self.read_GMM(target='LRG')
 
+
     def read(self, mockfile=None, mockformat='gaussianfield', healpixels=None,
              nside=None, only_coords=False, mock_density=False, sampling='gmm', **kwargs):
         """Read the catalog.
@@ -4244,7 +4344,7 @@ class BGSMaker(SelectTargets):
         
         if self.GMM_BGS is None:
             log.info('Reading BGS GMM.')
-
+            
             self.read_GMM(target='BGS')
 
             log.info('Finished reading BGS GMM.')

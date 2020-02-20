@@ -174,6 +174,7 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
                          magcut=magcut, nside_lya=nside_lya,
                          zmin_lya=zmin_lya, zmax_qso=zmax_qso,
                          nside_galaxia=nside_galaxia, mock_density=mock_density, sampling=sampling)
+
     
     log.info('Finished reading Target: {}, type: {}, format: {}, mockfile: {}'.format(
         target_name, target_type, mockformat, mockfile))
@@ -755,6 +756,7 @@ def get_contaminants_onepixel(params, healpix, nside, seed, nproc, log,
                     galaxy_data['CONTAM_NUMBER'] = np.round( cparams['galaxies'] * ntarg ).astype(int)
                     galaxy_data['CONTAM_FACTOR'] = cparams['galaxies'] * ntarg / len(galaxy_data['RA'])
 
+
                     # Sample from the appropriate Gaussian mixture model and
                     # then generate the spectra.
                     if target_type == 'LRG':
@@ -798,6 +800,7 @@ def get_contaminants_onepixel(params, healpix, nside, seed, nproc, log,
 
 def targets_truth(params, healpixels=None, nside=None, output_dir='.',
                   seed=None, nproc=1, nside_chunk=128, survey='main',
+
                   verbose=False, no_spectra=False, sampling='gmm', start=None):
     """Generate truth and targets catalogs, and noiseless spectra.
 
@@ -842,6 +845,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
     log, healpixseeds = initialize_targets_truth(
         params, verbose=verbose, seed=seed, nside=nside,
         output_dir=output_dir, healpixels=healpixels)
+    dndz = _load_dndz()
 
     dndz = _load_dndz()
 
