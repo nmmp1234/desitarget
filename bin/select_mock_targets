@@ -107,7 +107,7 @@ log.info('Calling targets_truth with survey={} at {}'.format(args.survey, time.a
 
 targets_truth(params, healpixels=healpixels, nside=args.nside, seed=args.seed, 
               output_dir=args.output_dir, nproc=args.nproc, verbose=args.verbose,
-              no_spectra=args.no_spectra, survey=args.survey, sampling=args.sampling)
+              no_spectra=args.no_spectra, survey=args.survey, sampling=args.sampling, start=start)
 
 log.info('All done at {} ({:.2f} minutes.).'.format(time.asctime(), (time.time() - start) / 60.))
 

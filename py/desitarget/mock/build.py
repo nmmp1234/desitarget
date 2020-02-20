@@ -158,7 +158,7 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
     else:
         mock_density = False
 
-    log.info('Target: {}, type: {}, format: {}, mockfile: {}'.format(
+    log.info('Reading Target: {}, type: {}, format: {}, mockfile: {}'.format(
         target_name, target_type, mockformat, mockfile))
 
     if MakeMock is None:
@@ -174,6 +174,10 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
                          magcut=magcut, nside_lya=nside_lya,
                          zmin_lya=zmin_lya, zmax_qso=zmax_qso,
                          nside_galaxia=nside_galaxia, mock_density=mock_density, sampling=sampling)
+    
+    log.info('Finished reading Target: {}, type: {}, format: {}, mockfile: {}'.format(
+        target_name, target_type, mockformat, mockfile))
+    
     if not bool(data):
         return data, MakeMock
 
@@ -794,7 +798,7 @@ def get_contaminants_onepixel(params, healpix, nside, seed, nproc, log,
 
 def targets_truth(params, healpixels=None, nside=None, output_dir='.',
                   seed=None, nproc=1, nside_chunk=128, survey='main',
-                  verbose=False, no_spectra=False, sampling='gmm'):
+                  verbose=False, no_spectra=False, sampling='gmm', start=None):
     """Generate truth and targets catalogs, and noiseless spectra.
 
     Parameters
@@ -829,7 +833,6 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
     Files 'targets.fits', 'truth.fits', 'sky.fits', 'standards-dark.fits', and
     'standards-bright.fits' written to output_dir for the given list of
     healpixels.
-
     """
     from desitarget.mock import mockmaker
     from desitarget.QA import _load_dndz
@@ -839,8 +842,13 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
     log, healpixseeds = initialize_targets_truth(
         params, verbose=verbose, seed=seed, nside=nside,
         output_dir=output_dir, healpixels=healpixels)
+
     dndz = _load_dndz()
 
+    if no_spectra:
+        # Use native resolution
+        nside_chunk = nside
+    
     # Read (and cache) the MockMaker classes we need.
     log.info('Initializing and caching all MockMaker classes.')
     AllMakeMock = []
@@ -887,7 +895,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             
     # Loop over each source / object type.
     for healpix, healseed in zip(healpixels, healpixseeds):
-        log.info('Working on healpixel {}'.format(healpix))
+        log.info('------------------   Working on healpixel {} after {} seconds   ------------------'.format(healpix, time.time() - start))
 
         alltargets = list()
         alltruth = list()

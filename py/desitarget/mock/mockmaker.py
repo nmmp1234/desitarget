@@ -27,7 +27,6 @@ from functools import lru_cache
 from astropy.table import Table, vstack, Column
 from desitarget import randoms
 from desitarget.randoms import dr8_quantities_at_positions_in_a_brick
-from get_maskbits import maskbit_at_positions_in_a_brick
 
 from desiutil.log import get_logger, DEBUG
 log = get_logger(timestamp=True)
@@ -37,7 +36,13 @@ try:
     C_LIGHT = constants.c/1000.0
 except TypeError: # This can happen during documentation builds.
     C_LIGHT = 299792458.0/1000.0
+    
+def flux2mag(flux):
+    mag            = -2.5*np.log10(flux*(flux>0)+0.001*(flux<=0)) + 22.5
+    mag[(flux<=0)] = 0.
 
+    return  mag
+    
 def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', time='dark', hp=32):        
     from   astropy.table      import Table, vstack
     from   desitarget.targets import desi_mask, bgs_mask, mws_mask
@@ -53,11 +58,11 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
     release = Table(_)
 
     # Append colors.
-    gmag    = 22.5 - 2.5 * np.log10(release['FLUX_G']  / release['MW_TRANSMISSION_G'])
-    rmag    = 22.5 - 2.5 * np.log10(release['FLUX_R']  / release['MW_TRANSMISSION_R'])
-    zmag    = 22.5 - 2.5 * np.log10(release['FLUX_Z']  / release['MW_TRANSMISSION_Z'])
-    W1mag   = 22.5 - 2.5 * np.log10(release['FLUX_W1'] / release['MW_TRANSMISSION_W1'])
-    W2mag   = 22.5 - 2.5 * np.log10(release['FLUX_W2'] / release['MW_TRANSMISSION_W2'])
+    gmag    = flux2mag(release['FLUX_G']  / release['MW_TRANSMISSION_G'])
+    rmag    = flux2mag(release['FLUX_R']  / release['MW_TRANSMISSION_R'])
+    zmag    = flux2mag(release['FLUX_Z']  / release['MW_TRANSMISSION_Z'])
+    W1mag   = flux2mag(release['FLUX_W1'] / release['MW_TRANSMISSION_W1'])
+    W2mag   = flux2mag(release['FLUX_W2'] / release['MW_TRANSMISSION_W2'])
 
     gr      = gmag - rmag
     rz      = rmag - zmag
@@ -86,17 +91,17 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
     release['MAG']           = np.zeros(len(release['FLUX_G']), dtype='f4') 
     release['MAGFILTER']     = np.zeros(len(release['FLUX_G']), dtype='S15')
 
-    release['MAG'][isLRG  &  issouth] = zmag[isLRG  &  issouth]
+    release['MAG'][ isLRG &  issouth] = zmag[ isLRG &  issouth]
     release['MAG'][~isLRG &  issouth] = rmag[~isLRG &  issouth]
 
-    release['MAG'][isLRG  & ~issouth] = zmag[isLRG  & ~issouth]
+    release['MAG'][ isLRG & ~issouth] = zmag[ isLRG & ~issouth]
     release['MAG'][~isLRG & ~issouth] = rmag[~isLRG & ~issouth]
 
     ##
-    release['MAGFILTER'][isLRG  &  issouth] = np.repeat('decam2014-z', np.count_nonzero( isLRG & issouth))
+    release['MAGFILTER'][ isLRG &  issouth] = np.repeat('decam2014-z', np.count_nonzero( isLRG & issouth))
     release['MAGFILTER'][~isLRG &  issouth] = np.repeat('decam2014-r', np.count_nonzero(~isLRG & issouth))
 
-    release['MAGFILTER'][isLRG  & ~issouth] = np.repeat('MzLS-z', np.count_nonzero( isLRG & ~issouth))
+    release['MAGFILTER'][ isLRG & ~issouth] = np.repeat('MzLS-z', np.count_nonzero( isLRG & ~issouth))
     release['MAGFILTER'][~isLRG & ~issouth] = np.repeat('BASS-r', np.count_nonzero(~isLRG & ~issouth))
 
     release['TYPE'] = release['MORPHTYPE']
@@ -112,13 +117,27 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
 
 @lru_cache(maxsize=1)
 def prep_release(npix=1, seed=0):
-    from   astropy.table import Table, vstack
+    from   astropy.table  import  Table, vstack
 
+    '''
+    Prep npix worth of pixels from a given release from both 
+    bright and dark. 
+
+    Parameters                                                                                                                                                                                                                        
+    ----------                                                                                                                                                                                                                        
+    npix : :class:`int`                                                                                                                                                                                                              
+        Number of pixels to prep. for both dark and bright.                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+    Returns                                                                                                                                                                                                                           
+    -------                                                                                                                                                                                                                           
+    targets : :class:`astropy.table.Table`                                                                                                                                                                                            
+        Targets table to be selected from.
+
+    '''
     
-    cnt    = 0
+    cnt   = 0
 
-    hps    = np.arange(0, 40, 1)
-    rand   = np.random.RandomState(seed)
+    hps   = np.arange(0, 35, 1)
+    rand  = np.random.RandomState(seed)
 
     np.random.shuffle(hps)
     
@@ -321,8 +340,10 @@ def empty_truth_table(nobj=1, templatetype='', use_simqso=True):
     truth.add_column(Column(name='FLUX_W4', length=nobj, dtype='f4', unit='nanomaggies'))
 
     _, objtruth = empty_metatable(nmodel=nobj, objtype=templatetype, simqso=use_simqso)
+
     if len(objtruth) == 0:
         objtruth = [] # need an empty list for the multiprocessing in build.select_targets
+
     else:
         if (templatetype == 'QSO' or templatetype == 'ELG' or
             templatetype == 'LRG' or templatetype == 'BGS'):
@@ -331,7 +352,6 @@ def empty_truth_table(nobj=1, templatetype='', use_simqso=True):
     return truth, objtruth
 
 def _get_radec(mockfile, nside, pixmap, mxxl=False):
-
     log.info('Reading {}'.format(mockfile))
     radec = fitsio.read(mockfile, columns=['RA', 'DEC'], upper=True, ext=1)
     ra = radec['RA'].astype('f8') % 360.0 # enforce 0 < ra < 360
@@ -1083,7 +1103,7 @@ class SelectTargets(object):
         return fiberfraction_g, fiberfraction_r, fiberfraction_z
     
     def _maskbits(self, targets, release=8, nproc=1):
-      bricks      = brick.Bricks(bricksize=0.25)
+      bricks      = self.Bricks
 
       bricknames  = bricks.brickname(targets['RA'], targets['DEC'])
 
@@ -1493,7 +1513,7 @@ class ReadGaussianField(SelectTargets):
                 ra, dec, allpix, pixweight = _get_radec(mockfile, nside, self.pixmap)
                 ReadGaussianField.cached_radec = (mockfile, nside, ra, dec, allpix, pixweight)
             else:
-                log.debug('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
+                log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
                 _, _, ra, dec, allpix, pixweight = ReadGaussianField.cached_radec
 
         mockid = np.arange(len(ra)) # unique ID/row number
@@ -1927,7 +1947,7 @@ class ReadUniformSky(SelectTargets):
                 ra, dec, allpix, pixweight = _get_radec(mockfile, nside, self.pixmap)
                 ReadUniformSky.cached_radec = (mockfile, nside, ra, dec, allpix, pixweight)
             else:
-                log.debug('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
+                log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
                 _, _, ra, dec, allpix, pixweight = ReadUniformSky.cached_radec
 
         mockid = np.arange(len(ra)) # unique ID/row number
@@ -2614,7 +2634,7 @@ class ReadMXXL(SelectTargets):
                 ra, dec, zz, rmag, absmag, gr, allpix, pixweight = _read_mockfile(mockfile, nside, self.pixmap)
                 ReadMXXL.cached_radec = (mockfile, nside, ra, dec, zz, rmag, absmag, gr, allpix, pixweight)
             else:
-                log.debug('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
+                log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
                 _, _, ra, dec, zz, rmag, absmag, gr, allpix, pixweight = ReadMXXL.cached_radec
 
         mockid = np.arange(len(ra)) # unique ID/row number
@@ -2787,7 +2807,7 @@ class ReadGAMA(SelectTargets):
                 ra, dec, allpix, pixweight = _get_radec(mockfile, nside, self.pixmap)
                 ReadGAMA.cached_radec = (mockfile, nside, ra, dec, allpix, pixweight)
             else:
-                log.debug('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
+                log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
                 _, _, ra, dec, allpix, pixweight = ReadGAMA.cached_radec
 
         mockid = np.arange(len(ra)) # unique ID/row number
@@ -2913,7 +2933,7 @@ class ReadMWS_WD(SelectTargets):
                 ra, dec, allpix, pixweight = _get_radec(mockfile, nside, self.pixmap)
                 ReadMWS_WD.cached_radec = (mockfile, nside, ra, dec, allpix, pixweight)
             else:
-                log.debug('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
+                log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
                 _, _, ra, dec, allpix, pixweight = ReadMWS_WD.cached_radec
 
         mockid = np.arange(len(ra)) # unique ID/row number
@@ -3072,7 +3092,7 @@ class ReadMWS_NEARBY(SelectTargets):
                 ra, dec, allpix, pixweight = _get_radec(mockfile, nside, self.pixmap)
                 ReadMWS_NEARBY.cached_radec = (mockfile, nside, ra, dec, allpix, pixweight)
             else:
-                log.debug('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
+                log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
                 _, _, ra, dec, allpix, pixweight = ReadMWS_NEARBY.cached_radec
         
         mockid = np.arange(len(ra)) # unique ID/row number
@@ -3754,6 +3774,8 @@ class LRGMaker(SelectTargets):
         self.meta = self.template_maker.basemeta
 
         # Build the KD Tree.
+        log.info('Building LRG KD Tree (North and South).')
+
         zobj = self.meta['Z'].data
         gr_north = (self.meta['BASS_G'] - self.meta['BASS_R']).data
         rz_north = (self.meta['BASS_R'] - self.meta['MZLS_Z']).data
@@ -3782,8 +3804,12 @@ class LRGMaker(SelectTargets):
                     gr_south,
                     rz_south,
                     zW1_south)).T, south=True )
+
+        log.info('Finished building LRG KD Tree (North and South).')
             
         if self.GMM_LRG is None:
+            log.info('Building Southern tree.')
+
             self.read_GMM(target='LRG')
 
     def read(self, mockfile=None, mockformat='gaussianfield', healpixels=None,
@@ -4208,12 +4234,21 @@ class BGSMaker(SelectTargets):
 
         self.param_min = ( zobj.min(), rmabs.min(), gr.min() )
         self.param_range = ( np.ptp(zobj), np.ptp(rmabs), np.ptp(gr) )
+
+        log.info('Building BGS KD Tree for spectra TEMPLATEID.')
+        
         if self.KDTree is None:
             BGSMaker.KDTree = self.KDTree_build(np.vstack((zobj, rmabs, gr)).T)
 
+        log.info('Finished building BGS KD Tree for spectra TEMPLATEID.')
+        
         if self.GMM_BGS is None:
+            log.info('Reading BGS GMM.')
+
             self.read_GMM(target='BGS')
 
+            log.info('Finished reading BGS GMM.')
+            
     def read(self, mockfile=None, mockformat='durham_mxxl_hdf5', healpixels=None,
              nside=None, magcut=None, only_coords=False, mock_density=False, sampling='gmm', **kwargs):
         """Read the catalog.
