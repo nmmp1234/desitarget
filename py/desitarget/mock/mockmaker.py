@@ -341,6 +341,8 @@ class SelectTargets(object):
         ------
 
         """
+        log.info('Computing MW Transmisison.')
+
         extcoeff = dict(G = 3.214, R = 2.165, Z = 1.221, W1 = 0.184, W2 = 0.113, W3 = 0.0241, W4 = 0.00910)
         data['EBV'] = SelectTargets.SFDMap.ebv(data['RA'], data['DEC'], scaling=1.0)
 
@@ -379,7 +381,10 @@ class SelectTargets(object):
         import astropy.units as u
         from astropy.coordinates import SkyCoord
 
-        nobj = len(data['RA'])
+
+        log.info('Computing PSF and GAL depths.')
+        
+        nobj         = len(data['RA'])
 
         psfdepth_mag = np.array((24.65, 23.61, 22.84)) # 5-sigma, mag
         galdepth_mag = np.array((24.7, 23.9, 23.0))    # 5-sigma, mag
@@ -441,8 +446,11 @@ class SelectTargets(object):
         """
         if seed is None:
             seed = self.seed
-        rand = np.random.RandomState(seed)
             
+        rand = np.random.RandomState(seed)
+
+        log.info('Adding scatter to photometry.')
+        
         if indx is None:
             indx = np.arange(len(data['RA']))
         nobj = len(indx)
@@ -958,6 +966,8 @@ class SelectTargets(object):
             If fiberfraction is outside the bounds [0-1] (inclusive).
 
         """
+        log.info('Estimating the fiber flux for targets.')
+
         ntarg = len(targets)
         fiberfraction_g = np.zeros(ntarg).astype('f4')
         fiberfraction_r, fiberfraction_z = np.zeros_like(fiberfraction_g), np.zeros_like(fiberfraction_g)
@@ -1066,6 +1076,8 @@ class SelectTargets(object):
             indx = np.arange(len(data['RA']))
         nobj = len(indx)
 
+        log.info('Creating targets and truth tables.')
+        
         # Initialize the tables.
         targets             = empty_targets_table(nobj)
         truth, objtruth     = empty_truth_table(nobj, templatetype=templatetype,
@@ -1073,6 +1085,8 @@ class SelectTargets(object):
 
         truth['MOCKID'][:]  = data['MOCKID'][indx]
 
+        log.info('Populating targets and truth tables with mock data.')
+        
         if len(objtruth) > 0:
             if 'Z_NORSD' in data.keys() and 'TRUEZ_NORSD' in objtruth.colnames:
                 objtruth['TRUEZ_NORSD'][:] = data['Z_NORSD'][indx]
@@ -1152,6 +1166,8 @@ class SelectTargets(object):
             targets[key][:] = targets[key] * data['MW_TRANSMISSION_{}'.format(band)][indx]
 
         # Attenuate the spectra for extinction, too.
+        log.info('Attenuating the spectra for extinction.')
+
         if len(flux) > 0 and 'EBV' in data.keys():
             flux *= 10**( -0.4 * data['EBV'][indx, np.newaxis] * self.extinction )
 
