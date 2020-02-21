@@ -27,6 +27,7 @@ from functools import lru_cache
 from astropy.table import Table, vstack, Column
 from desitarget import randoms
 from desitarget.randoms import dr8_quantities_at_positions_in_a_brick
+from desitarget.mock.release import prep_release
 
 from desiutil.log import get_logger, DEBUG
 log = get_logger(timestamp=True)
@@ -269,7 +270,7 @@ class SelectTargets(object):
         (main survey) and `sv1` (first iteration of SV).  Defaults to `main`.
 
     """
-    GMM_LRG, GMM_ELG, GMM_BGS, GMM_QSO, FFA = None, None, None, None, None
+    GMM_LRG, GMM_ELG, GMM_BGS, GMM_QSO, FFA, Bricks, SFDMap, release = None, None, None, None, None, None, None, None
 
     def __init__(self, bricksize=0.25, survey='main', **kwargs):
         from astropy.io import fits
@@ -289,22 +290,32 @@ class SelectTargets(object):
             raise ValueError
             
         self.desi_mask = desi_mask
-        self.bgs_mask = bgs_mask
-        self.mws_mask = mws_mask
+        self.bgs_mask  = bgs_mask
+        self.mws_mask  = mws_mask
 
-        log.info('Setting brick attibute.')
-        
-        self.Bricks = Bricks(bricksize=bricksize)
-
-        log.info('Setting SFD map.')
-
-        self.SFDMap = SFDMap()
+        if self.Bricks is None:
+          log.info('Setting brick attibute.')
+            
+          SelectTargets.Bricks = Bricks(bricksize=bricksize)
+          
+        if self.SFDMap is None:
+          log.info('Setting SFD map.')
+            
+          SelectTargets.SFDMap = SFDMap()
+          
+        if self.release is None:
+          log.info('Setting release.')
+         
+          SelectTargets.release = prep_release()
         
         # Cache the plate scale (which is approximate; see
         # $DESIMODEL/data/desi.yaml), and the FastFiberAcceptance class for the
         # fiberflux calculation, below.
         self.plate_scale_arcsec2um = 107.0 / 1.52 # [um/arcsec]
+
         if self.FFA is None:
+            log.info('Setting fast fiber acceptance.')
+
             SelectTargets.FFA = FastFiberAcceptance(filename=os.path.join(
                 os.getenv('DESIMODEL'), 'data', 'throughput', 'galsim-fiber-acceptance.fits'))
 
@@ -313,6 +324,7 @@ class SelectTargets(object):
 
         # Read and cache the default pixel weight map.
         pixfile = os.path.join(os.environ['DESIMODEL'],'data','footprint','desi-healpix-weights.fits')
+
         with fits.open(pixfile) as hdulist:
             self.pixmap = hdulist[0].data
 
@@ -330,7 +342,7 @@ class SelectTargets(object):
 
         """
         extcoeff = dict(G = 3.214, R = 2.165, Z = 1.221, W1 = 0.184, W2 = 0.113, W3 = 0.0241, W4 = 0.00910)
-        data['EBV'] = self.SFDMap.ebv(data['RA'], data['DEC'], scaling=1.0)
+        data['EBV'] = SelectTargets.SFDMap.ebv(data['RA'], data['DEC'], scaling=1.0)
 
         for band in ('G', 'R', 'Z', 'W1', 'W2', 'W3', 'W4'):
             data['MW_TRANSMISSION_{}'.format(band)] = 10**(-0.4 * extcoeff[band] * data['EBV'])
@@ -778,8 +790,8 @@ class SelectTargets(object):
         log.info('Sampling from desitarget release.')
         
         # ignore north/south split.
-        isin    = self.release['SAMPLE'] == bytes(target, encoding='UTF=8')            
-        release = self.release[isin]
+        isin    = SelectTargets.release['SAMPLE'] == bytes(target, encoding='UTF=8')            
+        release = SelectTargets.release[isin]
         
         choose  = np.random.choice(len(release), nobj)
         
@@ -987,7 +999,9 @@ class SelectTargets(object):
         return fiberfraction_g, fiberfraction_r, fiberfraction_z
     
     def _maskbits(self, targets, release=8, nproc=1):
-      bricks      = self.Bricks
+      log.info('Setting MASKBITS.')
+
+      bricks      = SelectTargets.Bricks
 
       bricknames  = bricks.brickname(targets['RA'], targets['DEC'])
 
@@ -1391,7 +1405,7 @@ class ReadGaussianField(SelectTargets):
         if self.cached_radec is None:
             log.info('Caching coordinates, healpixels, and pixel weights from {}'.format(mockfile))    
             
-            ra, dec, allpix, pixweight = _get_radec(mockfile, nside, self.pixmap)
+            ra, dec, allpix, pixweight     = _get_radec(mockfile, nside, self.pixmap)
             ReadGaussianField.cached_radec = (mockfile, nside, ra, dec, allpix, pixweight)
 
         else:
@@ -1540,8 +1554,8 @@ class ReadGaussianField(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'gaussianfield',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'Z_NORSD': zz_norsd,
                'SOUTH': isouth, 'REF_CAT': refcat}
 
@@ -1741,8 +1755,8 @@ class ReadBuzzard(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'buzzard',
             'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-            'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-            'BRICKID': self.Bricks.brickid(ra, dec),
+            'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+            'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
             'RA': ra, 'DEC': dec, 'Z': zz,
             'MAG': rmag, 'MAGFILTER': np.repeat('decam2014-r', nobj),
             #'GMAG': gmag, 'MAGFILTER-G': np.repeat('decam2014-g', nobj),
@@ -1876,8 +1890,8 @@ class ReadUniformSky(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'uniformsky',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': np.zeros(len(ra)),
                'SOUTH': isouth, 'REF_CAT': refcat}
 
@@ -2116,8 +2130,8 @@ class ReadGalaxia(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'galaxia',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz,
                'TEFF': teff, 'LOGG': logg, 'FEH': feh,
                'MAG': mag, 'MAGFILTER': np.repeat('sdss2010-r', nobj),
@@ -2395,8 +2409,8 @@ class ReadLyaCoLoRe(SelectTargets):
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
                #'OBJID': objid,
                'MOCKID': mockid, 'LYAFILES': np.array(lyafiles),
-               'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'Z_NORSD': zz_norsd,
                'MAG': mag, 'MAGFILTER': magfilter,
                'SOUTH': isouth, 'REF_CAT': refcat}
@@ -2520,7 +2534,7 @@ class ReadMXXL(SelectTargets):
             log.info('Generating cached coordinates.')
 
             ra, dec, zz, rmag, absmag, gr, allpix, pixweight = _read_mockfile(mockfile, nside, self.pixmap)
-            ReadMXXL.cached_radec = (mockfile, nside, ra, dec, zz, rmag, absmag, gr, allpix, pixweight)
+            ReadMXXL.cached_radec                            = (mockfile, nside, ra, dec, zz, rmag, absmag, gr, allpix, pixweight)
 
         else:            
             cached_mockfile, cached_nside, ra, dec, zz, rmag, absmag, gr, allpix, pixweight = ReadMXXL.cached_radec
@@ -2529,7 +2543,7 @@ class ReadMXXL(SelectTargets):
                 log.info('Regenerating cached coordinates.')
                 
                 ra, dec, zz, rmag, absmag, gr, allpix, pixweight = _read_mockfile(mockfile, nside, self.pixmap)
-                ReadMXXL.cached_radec = (mockfile, nside, ra, dec, zz, rmag, absmag, gr, allpix, pixweight)
+                ReadMXXL.cached_radec                            = (mockfile, nside, ra, dec, zz, rmag, absmag, gr, allpix, pixweight)
 
             else:
                 log.info('Using cached coordinates, healpixels, and pixel weights from {}'.format(mockfile))
@@ -2601,8 +2615,8 @@ class ReadMXXL(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'durham_mxxl_hdf5',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'MAG': rmag, 'SDSS_absmag_r01': absmag,
                'SDSS_01gr': gr, 'MAGFILTER': np.repeat('sdss2010-r', nobj),
                'SOUTH': isouth, 'REF_CAT': refcat}
@@ -2740,8 +2754,8 @@ class ReadGAMA(SelectTargets):
         # properties here.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'bgs-gama',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'RMABS_01': data['UGRIZ_ABSMAG_01'][:, 2],
                'UG_01': data['UGRIZ_ABSMAG_01'][:, 0]-data['UGRIZ_ABSMAG_01'][:, 1],
                'GR_01': data['UGRIZ_ABSMAG_01'][:, 1]-data['UGRIZ_ABSMAG_01'][:, 2],
@@ -2880,8 +2894,8 @@ class ReadMWS_WD(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'mws_wd',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'MAG': mag, 'TEFF': teff, 'LOGG': logg,
                'MAGFILTER': np.repeat('sdss2010-g', nobj),
                'TEMPLATESUBTYPE': templatesubtype,
@@ -3037,8 +3051,8 @@ class ReadMWS_NEARBY(SelectTargets):
         # Pack into a basic dictionary.
         out = {'TARGET_NAME': target_name, 'MOCKFORMAT': 'mws_100pc',
                'HEALPIX': allpix, 'NSIDE': nside, 'WEIGHT': weight,
-               'MOCKID': mockid, 'BRICKNAME': self.Bricks.brickname(ra, dec).astype('S8'),
-               'BRICKID': self.Bricks.brickid(ra, dec),
+               'MOCKID': mockid, 'BRICKNAME': SelectTargets.Bricks.brickname(ra, dec).astype('S8'),
+               'BRICKID': SelectTargets.Bricks.brickid(ra, dec),
                'RA': ra, 'DEC': dec, 'Z': zz, 'MAG': mag, 'TEFF': teff, 'LOGG': logg, 'FEH': feh,
                'MAGFILTER': np.repeat('sdss2010-g', nobj), 'TEMPLATESUBTYPE': templatesubtype,
 

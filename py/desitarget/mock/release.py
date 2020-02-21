@@ -37,7 +37,7 @@ def prep_releasepixel(release=8, ver='0.32.0', main='main', resolve='resolve', t
     from   astropy.table      import Table, vstack
     from   desitarget.targets import desi_mask, bgs_mask, mws_mask
 
-    log.info('Preparing release healpixel: {}'.format(hp))
+    log.info('Preparing release healpixel: {} ({})'.format(hp, time))
 
     # E.g. /project/projectdirs/desi/target/catalogs/dr8/0.32.0/targets/main/resolve/bright/targets-dr8-hp-14.fits                                                                                                                      
     fpath   = '/project/projectdirs/desi/target/catalogs/dr{}/{}/targets/{}/{}/{}/targets-dr{}-hp-{}.fits'.format(release, ver, main, resolve, time, release, str(hp))

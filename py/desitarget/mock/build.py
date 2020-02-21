@@ -17,6 +17,7 @@ from astropy.table import vstack, Table
 
 from desimodel.footprint import radec2pix
 
+
 def initialize_targets_truth(params, healpixels=None, nside=None, output_dir='.', 
                              seed=None, verbose=False):
     """Initialize various objects needed to generate mock targets.
@@ -850,13 +851,9 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
     dndz = _load_dndz()
 
     dndz = _load_dndz()
-
-    if no_spectra:
-        # Use native resolution
-        nside_chunk = nside
     
     # Read (and cache) the MockMaker classes we need.
-    log.info('Initializing and caching all MockMaker classes.')
+    log.info('Initializing and caching all MockMaker classes ({}).'.format(sorted(params['targets'].keys())))
     AllMakeMock = []
     for target_name in sorted(params['targets'].keys()):
         target_type = params['targets'][target_name].get('target_type')
@@ -898,10 +895,12 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
                 target_name='CONTAM_GALAXY', survey=survey)
         else:
             ContamGalaxiesMock = None
+
+    log.info('Finished initializing and caching all MockMaker classes.')
             
     # Loop over each source / object type.
     for healpix, healseed in zip(healpixels, healpixseeds):
-        log.info('------------------   Working on healpixel {} after {} seconds   ------------------'.format(healpix, time.time() - start))
+        log.info('\n\n------------------   Working on healpixel {} after {} seconds   ------------------'.format(healpix, time.time() - start))
 
         alltargets = list()
         alltruth = list()
@@ -913,7 +912,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
         for ii, target_name in enumerate(sorted(params['targets'].keys())):
             targets, truth, skytargets, skytruth = [], [], [], []
 
-            # Read the data and ithere are no targets, keep going.
+            # Read the data and if here are no targets, keep going.
             log.info('Working on target class {} on healpixel {}'.format(target_name, healpix))
             data, MakeMock = read_mock(params['targets'][target_name], log, target_name,
                                        seed=healseed, healpixels=healpix,
@@ -927,6 +926,8 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             target_type = params['targets'][target_name]['target_type'].upper()
             sky = target_type == 'SKY'
             calib_only = params['targets'][target_name].get('calib_only', False)
+
+
             targets, truth, objtruth, trueflux = get_spectra(data, MakeMock, log, nside=nside,
                                                              nside_chunk=nside_chunk, seed=healseed,
                                                              nproc=nproc, sky=sky, no_spectra=no_spectra,
@@ -934,6 +935,8 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             del data
             
             if sky:
+                log.info('Generating sky targets.')
+                
                 allskytargets.append(targets)
                 allskytruth.append(truth)
 
@@ -975,6 +978,8 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
                 ContamGalaxiesMock=ContamGalaxiesMock)
 
         # Finish up.
+        log.info('Finishing up.')
+        
         targets, truth, objtruth, skytargets, skytruth = finish_catalog(
             targets, truth, objtruth, skytargets, skytruth, healpix,
             nside, log, seed=healseed, survey=survey)
