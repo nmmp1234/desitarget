@@ -13,7 +13,7 @@ import os, time
 import numpy as np
 import healpy as hp
 
-from astropy.table import vstack
+from astropy.table import vstack, Table
 
 from desimodel.footprint import radec2pix
 
@@ -97,7 +97,7 @@ def initialize_targets_truth(params, healpixels=None, nside=None, output_dir='.'
     return log, healpixseeds
     
 def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
-              nside=None, nside_chunk=128, MakeMock=None):
+              nside=None, nside_chunk=128, MakeMock=None, dndz=None):
     """Read a mock catalog.
     
     Parameters
@@ -118,6 +118,9 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
     nside_chunk : :class:`int`, optional
         Healpix resolution for chunking the sample to avoid memory problems.
         (NB: nside_chunk must be <= nside).  Defaults to 128.
+    dndz : :class:`dict`, optional
+        Expected redshift distributions for all target classes.  Defaults to
+        None.
             
     Returns
     -------
@@ -144,8 +147,11 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
     zmin_lya = params.get('zmin_lya')
     zmax_qso = params.get('zmax_qso')
     use_simqso = params.get('use_simqso', True)
+    sqmodel = params.get('sqmodel','default')
     balprob = params.get('balprob', 0.0)
     add_dla = params.get('add_dla', False)
+    add_metals = params.get('add_metals', False)
+    add_lyb = params.get('add_lyb', False)
 
     if 'density' in params.keys():
         mock_density = True
@@ -156,11 +162,10 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
         target_name, target_type, mockformat, mockfile))
 
     if MakeMock is None:
-        MakeMock = getattr(mockmaker, '{}Maker'.format(target_name))(seed=seed, nside_chunk=nside_chunk,
-                                                                     calib_only=calib_only,
-                                                                     use_simqso=use_simqso,
-                                                                     balprob=balprob,
-                                                                     add_dla=add_dla)
+        MakeMock = getattr(mockmaker, '{}Maker'.format(target_name))(
+            seed=seed, nside_chunk=nside_chunk, calib_only=calib_only,
+            use_simqso=use_simqso, sqmodel=sqmodel, balprob=balprob, add_dla=add_dla,
+            add_metals=add_metals, add_lyb=add_lyb)
     else:
         MakeMock.seed = seed # updated seed
         
@@ -179,7 +184,27 @@ def read_mock(params, log=None, target_name='', seed=None, healpixels=None,
             raise ValueError
         
         data['DENSITY'] = params['density']
-        data['DENSITY_FACTOR'] = data['DENSITY'] / data['MOCK_DENSITY']
+
+        # Note: the tracer and Lya QSO target densities are defined relative to
+        # a z=2.1 redshift cut-off which, in general, is different from the
+        # cut-offs defined in the select_mock_targets parameter file (typically
+        # ZMAX_QSO and ZMIN_LYA).  So we need to adjust the desired target
+        # densities here by the appropriate ratio given by the desired redshift
+        # distribution.
+        if target_type == 'QSO' and target_type in dndz.keys():
+            zbins = np.arange(0, 5, 0.1)
+            qsodndz = np.interp(zbins, dndz[target_type]['z'], dndz[target_type]['dndz'], left=0, right=0)
+            qsodndz *= np.sum(dndz[target_type]['dndz']) / np.sum(qsodndz)
+
+            if target_name == 'QSO' and 'zmax_qso' in params.keys():
+                extrafactor = np.sum(qsodndz[zbins >= 2.1]) / np.sum(qsodndz[zbins >= params['zmax_qso']])
+            if target_name == 'LYA' and 'zmin_lya' in params.keys():
+                extrafactor = np.sum(qsodndz[zbins >= params['zmin_lya']]) / np.sum(qsodndz[zbins >= 2.1])
+        else:
+            extrafactor = 1.0
+            
+        data['DENSITY_FACTOR'] = extrafactor * data['DENSITY'] / data['MOCK_DENSITY']
+            
         if data['DENSITY_FACTOR'] > 1:
             log.warning('Density factor {} should not be > 1!'.format(data['DENSITY_FACTOR']))
             data['DENSITY_FACTOR'] = 1.0
@@ -272,7 +297,6 @@ def get_spectra_onepixel(data, indx, MakeMock, seed, log, ntarget,
             ntot += nkeep
             log.debug('Generated {} / {} ({} / {} total) {} targets on iteration {} / {}.'.format(
                 nkeep, len(chunktargets), ntot, ntarget, targname, itercount+1, maxiter))
-
             targets.append(chunktargets[keep])
             truth.append(chunktruth[keep])
             if len(chunkobjtruth) > 0: # skies have no objtruth
@@ -769,8 +793,8 @@ def get_contaminants_onepixel(params, healpix, nside, seed, nproc, log,
     return targets, truth, objtruth, trueflux
 
 def targets_truth(params, healpixels=None, nside=None, output_dir='.',
-                  seed=None, nproc=1, nside_chunk=128, verbose=False,
-                  no_spectra=False):
+                  seed=None, nproc=1, nside_chunk=128, survey='main',
+                  verbose=False, no_spectra=False):
     """Generate truth and targets catalogs, and noiseless spectra.
 
     Parameters
@@ -792,6 +816,9 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
     nside_chunk : :class:`int`, optional
         Healpix resolution for chunking the sample to avoid memory problems.
         (NB: nside_chunk must be <= nside).  Defaults to 128.
+    survey : :class:`str`, optional
+        Specify which target masks yaml file to use.  The options are `main`
+        (main survey) and `sv1` (first iteration of SV).  Defaults to `main`.
     verbose : :class:`bool`, optional
         Be verbose. Defaults to False.
     no_spectra : :class:`bool`, optional
@@ -805,10 +832,14 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
 
     """
     from desitarget.mock import mockmaker
+    from desitarget.QA import _load_dndz
+    from desitarget.io import write_targets, write_skies, find_target_files
+    #import desitarget.mock.io as mockio
 
     log, healpixseeds = initialize_targets_truth(
         params, verbose=verbose, seed=seed, nside=nside,
         output_dir=output_dir, healpixels=healpixels)
+    dndz = _load_dndz()
 
     # Read (and cache) the MockMaker classes we need.
     log.info('Initializing and caching all MockMaker classes.')
@@ -817,13 +848,16 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
         target_type = params['targets'][target_name].get('target_type')
         calib_only = params['targets'][target_name].get('calib_only', False)
         use_simqso = params['targets'][target_name].get('use_simqso', True)
+        sqmodel=params['targets'][target_name].get('sqmodel', 'default')
         balprob = params['targets'][target_name].get('balprob', 0.0)
         add_dla = params['targets'][target_name].get('add_dla', False)
-
+        add_metals = params['targets'][target_name].get('add_metals', False)
+        add_lyb = params['targets'][target_name].get('add_lyb', False)
         AllMakeMock.append(getattr(mockmaker, '{}Maker'.format(target_name))(
             seed=seed, nside_chunk=nside_chunk, calib_only=calib_only,
-            use_simqso=use_simqso, balprob=balprob, add_dla=add_dla,
-            no_spectra=no_spectra))
+            use_simqso=use_simqso, sqmodel=sqmodel, balprob=balprob, add_dla=add_dla,
+            add_metals=add_metals, add_lyb=add_lyb, no_spectra=no_spectra,
+            survey=survey))
 
     # Are we adding contaminants?  If so, cache the relevant classes here.
     if 'contaminants' in params.keys():
@@ -834,7 +868,8 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
                 raise ValueError
             star_name, _ = list(params['contaminants']['stars'].items())[0]
             ContamStarsMock = getattr(mockmaker, '{}Maker'.format(star_name))(
-                seed=seed, nside_chunk=nside_chunk, no_spectra=no_spectra)
+                seed=seed, nside_chunk=nside_chunk, no_spectra=no_spectra,
+                survey=survey)
         else:
             ContamStarsMock = None
                 
@@ -846,7 +881,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             galaxies_name, _ = list(params['contaminants']['galaxies'].items())[0]
             ContamGalaxiesMock = getattr(mockmaker, '{}Maker'.format(galaxies_name))(
                 seed=seed, nside_chunk=nside_chunk, no_spectra=no_spectra,
-                target_name='CONTAM_GALAXY')
+                target_name='CONTAM_GALAXY', survey=survey)
         else:
             ContamGalaxiesMock = None
             
@@ -869,7 +904,7 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
             data, MakeMock = read_mock(params['targets'][target_name], log, target_name,
                                        seed=healseed, healpixels=healpix,
                                        nside=nside, nside_chunk=nside_chunk,
-                                       MakeMock=AllMakeMock[ii])
+                                       MakeMock=AllMakeMock[ii], dndz=dndz)
             
             if not bool(data):
                 continue
@@ -927,17 +962,38 @@ def targets_truth(params, healpixels=None, nside=None, output_dir='.',
         # Finish up.
         targets, truth, objtruth, skytargets, skytruth = finish_catalog(
             targets, truth, objtruth, skytargets, skytruth, healpix,
-            nside, log, seed=healseed)
+            nside, log, seed=healseed, survey=survey)
 
-        # Finally, write the results to disk.
-        write_targets_truth(targets, truth, objtruth, trueflux, MakeMock.wave,
-                            skytargets, skytruth,  healpix, nside, log, output_dir, 
-                            seed=healseed)
+        # Finally, write the results to disk separately for bright- and
+        # dark-time targets.
+        #outdir = mockio.get_healpix_dir(nside, healpix, basedir=output_dir)
+        #os.makedirs(outdir, exist_ok=True)
         
+        nobj, nsky = len(targets), len(skytargets)
+        if nobj > 0:
+            for obscon in ['BRIGHT', 'DARK']:
+                mockdata = {'truth': truth, 'objtruth': objtruth, 'seed': healseed,
+                            'truewave': MakeMock.wave, 'trueflux': trueflux}
+                ntargs, outfile = write_targets(output_dir, targets.as_array(), resolve=True,
+                                                obscon=obscon, survey=survey, nside=nside,
+                                                nsidefile=nside, hpxlist=healpix, nchunks=None,
+                                                qso_selection='colorcuts', mockdata=mockdata)
+                log.info('{} targets written to {}'.format(ntargs, outfile))
+            
+        skyfile = find_target_files(output_dir, flavor='sky', nside=nside,
+                                    hp=healpix, mock=True)
+        if nsky > 0:
+            log.info('Writing {} SKY targets to {}'.format(nsky, skyfile))
+            write_skies(output_dir, skytargets.as_array(), nside=nside, nsidefile=nside,
+                        hpxlist=healpix, mock=True)
+        else:
+            log.info('No SKY targets generated; {} not written.'.format(skyfile))
+            log.info('  Sky file {} not written.'.format(skyfile))
+            
 def finish_catalog(targets, truth, objtruth, skytargets, skytruth, healpix,
                    nside, log, seed=None, survey='main'):
-    """Add hpxpixel, brick_objid, targetid, subpriority, priority, and numobs to the
-    target catalog.
+    """Add various mission-critical columns to the target catalog, including
+    hpxpixel, brick_objid, targetid, subpriority, priority, and numobs.
     
     Parameters
     ----------
@@ -959,17 +1015,17 @@ def finish_catalog(targets, truth, objtruth, skytargets, skytruth, healpix,
        Logger object.
     seed : :class:`int`, optional
         Seed for the random number generation.  Defaults to None.
-    survey : :class:`str`
-        Specifies which target masks yaml file to use. Options are `main`, `cmx`
-        and `sv` for the main survey, commissioning and SV, respectively.
-        Defaults to `main`.
-            
+    survey : :class:`str`, optional
+        Specify which target masks yaml file to use.  The options are `main`
+        (main survey) and `sv1` (first iteration of SV).  Defaults to `main`.
+
     Returns
     -------
     Updated versions of targets, truth, objtruth, skytargets, and skytruth.
 
     """
-    from desitarget.targets import encode_targetid, initial_priority_numobs
+    from desitarget.targets import encode_targetid, finalize
+    #from desitarget.targets import encode_targetid, initial_priority_numobs
 
     rand = np.random.RandomState(seed)
     
@@ -993,14 +1049,25 @@ def finish_catalog(targets, truth, objtruth, skytargets, skytruth, healpix,
     subpriority = rand.uniform(0.0, 1.0, size=nobj + nsky)
 
     if nobj > 0:
+        # Run the official "finalize" script, so all the mission-critical target
+        # columns are included.  Unfortunately, we have to unpack the targeting
+        # bits and let "finalize" do its magic.
+
         #targets['BRICKID'][:] = healpix # use the derived BRICKID values
-        targets['HPXPIXEL'][:] = healpix
-        targets['BRICK_OBJID'][:] = objid[:nobj]
-        targets['TARGETID'][:] = targetid[:nobj]
+        #targets['HPXPIXEL'][:] = healpix
+        targets['OBJID'][:] = objid[:nobj]
+        #targets['TARGETID'][:] = targetid[:nobj]
+
+        desi_target, bgs_target, mws_target = targets['DESI_TARGET'], targets['BGS_TARGET'], targets['MWS_TARGET']
+        targets.remove_columns(['DESI_TARGET', 'BGS_TARGET', 'MWS_TARGET'])
+
+        targets = Table(finalize(targets.as_array(), desi_target, bgs_target, mws_target,
+                                 survey=survey, darkbright=True, targetid=targetid[:nobj]))
+        
         targets['SUBPRIORITY'][:] = subpriority[:nobj]
-        truth['TARGETID'][:] = targetid[:nobj]
 
         # Assign the appropriate TARGETID values to the objtruth tables.
+        truth['TARGETID'][:] = targetid[:nobj]
         for obj in set(truth['TEMPLATETYPE']):
             these = obj == truth['TEMPLATETYPE']
             objtruth[obj]['TARGETID'][:] = truth['TARGETID'][these]
@@ -1012,164 +1079,28 @@ def finish_catalog(targets, truth, objtruth, skytargets, skytruth, healpix,
               not np.all( (objtruth[obj]['TARGETID'] == targets['TARGETID'][these]) ):
                 log.warning('Mismatching TARGETIDs!')
                 raise ValueError                
-                    
-        targets['PRIORITY_INIT'], targets['NUMOBS_INIT'] = initial_priority_numobs(
-            targets, survey=survey)
-
-        # Rename TYPE --> MORPHTYPE
-        targets.rename_column('TYPE', 'MORPHTYPE')
-
-        assert(len(targets['TARGETID'])==len(np.unique(targets['TARGETID'])))
+            
+        #targets['PRIORITY_INIT'], targets['NUMOBS_INIT'] = \
+        #        initial_priority_numobs(targets)
+        #targets = _rename_bysurvey(targets, survey=survey)
+        
+        assert(len(targets['TARGETID']) == len(np.unique(targets['TARGETID'])))
 
     if nsky > 0:
-        skytargets['HPXPIXEL'][:] = healpix
-        skytargets['BRICK_OBJID'][:] = objid[nobj:]
-        skytargets['TARGETID'][:] = targetid[nobj:]
+        #skytargets['HPXPIXEL'][:] = healpix
+        skytargets['OBJID'][:] = objid[nobj:]
+
+        #skytargets['TARGETID'][:] = targetid[nobj:]
+
+        desi_target, bgs_target, mws_target = skytargets['DESI_TARGET'], skytargets['BGS_TARGET'], skytargets['MWS_TARGET']
+        skytargets.remove_columns(['DESI_TARGET', 'BGS_TARGET', 'MWS_TARGET'])
+
+        skytargets = Table(finalize(skytargets.as_array(), desi_target, bgs_target, mws_target,
+                                    survey=survey, darkbright=True, sky=1, targetid=targetid[nobj:]))
+        
         skytargets['SUBPRIORITY'][:] = subpriority[nobj:]
-        skytruth['TARGETID'][:] = targetid[nobj:]
-
-        skytargets['PRIORITY_INIT'], skytargets['NUMOBS_INIT'] = initial_priority_numobs(
-            skytargets, survey=survey)
-
-        # Rename TYPE --> MORPHTYPE
-        skytargets.rename_column('TYPE', 'MORPHTYPE')
 
     return targets, truth, objtruth, skytargets, skytruth
-
-def write_targets_truth(targets, truth, objtruth, trueflux, truewave, skytargets,
-                        skytruth, healpix, nside, log, output_dir, seed=None):
-    """Writes all the final catalogs to disk.
-    
-    Parameters
-    ----------
-    targets : :class:`astropy.table.Table`
-        Final target catalog.
-    truth : :class:`astropy.table.Table`
-        Corresponding truth table for targets.
-    objtruth : :class:`astropy.table.Table`
-        Corresponding objtype-specific truth table (if applicable).
-    trueflux : :class:`numpy.ndarray`
-        Array [npixel, ntarget] of observed-frame spectra.  
-    truewave : :class:`numpy.ndarray`
-        Wavelength array corresponding to trueflux.
-    skytargets : :class:`astropy.table.Table`
-        Sky targets.
-    skytruth : :class:`astropy.table.Table`
-        Corresponding truth table for sky targets.
-    healpix : : :class:`int`
-        Healpixel number.
-    nside : :class:`int`
-        Nside corresponding to healpix.
-    log : :class:`desiutil.logger`
-       Logger object.
-    seed : :class:`int`, optional
-        Seed for the random number generation.  Defaults to None.
-    output_dir : :class:`str`
-        Output directory.
-            
-    Returns
-    -------
-    Files targets-{nside}-{healpix}.fits, truth-{nside}-{healpix}.fits,
-    sky-{nside}-{healpix}.fits, standards-bright-{nside}-{healpix}.fits, and
-    standards-dark-{nside}-{healpix}.fits are all written to disk.
-
-    Raises
-    ------
-    ValueError
-        If there are duplicate targetid ids.
-    """
-    from astropy.io import fits
-    from desiutil import depend
-    from desispec.io.util import fitsheader, write_bintable
-    import desitarget.mock.io as mockio
-    from ..targetmask import desi_mask
-    
-    nobj = len(targets)
-    nsky = len(skytargets)
-    
-    if seed is None:
-        seed1 = 'None'
-    else:
-        seed1 = seed
-    truthhdr = fitsheader(dict(
-        SEED = (seed1, 'initial random seed')
-        ))
-
-    targetshdr = fitsheader(dict(
-        SEED = (seed1, 'initial random seed')
-        ))
-    targetshdr['HPXNSIDE'] = (nside, 'HEALPix nside')
-    targetshdr['HPXNEST'] = (True, 'HEALPix nested (not ring) ordering')
-
-    outdir = mockio.get_healpix_dir(nside, healpix, basedir=output_dir)
-    os.makedirs(outdir, exist_ok=True)
-
-    # Write out the sky catalog.
-    skyfile = mockio.findfile('sky', nside, healpix, basedir=output_dir)
-    if nsky > 0:
-        log.info('Writing {} SKY targets to {}'.format(nsky, skyfile))
-        write_bintable(skyfile+'.tmp', skytargets, extname='SKY',
-                               header=targetshdr, clobber=True)
-        os.rename(skyfile+'.tmp', skyfile)
-    else:
-        log.info('No sky targets generated; {} not written.'.format(skyfile))
-        log.info('  Sky file {} not written.'.format(skyfile))
-
-    if nobj > 0:
-        # Write out the dark- and bright-time standard stars.
-        for stdsuffix, stdbit in zip(('dark', 'bright'), ('STD_FAINT', 'STD_BRIGHT')):
-            stdfile = mockio.findfile('standards-{}'.format(stdsuffix), nside, healpix, basedir=output_dir)
-            istd = ( (targets['DESI_TARGET'] & desi_mask.mask(stdbit)) |
-                     (targets['DESI_TARGET'] & desi_mask.mask('STD_WD')) ) != 0
-
-            if np.count_nonzero(istd) > 0:
-                log.info('Writing {} {} standards to {}'.format(np.sum(istd), stdsuffix.upper(), stdfile))
-                write_bintable(stdfile+'.tmp', targets[istd], extname='STD',
-                               header=targetshdr, clobber=True)
-                os.rename(stdfile+'.tmp', stdfile)
-            else:
-                log.info('No {} standards stars selected.'.format(stdsuffix))
-                log.info('  Standard star file {} not written.'.format(stdfile))
-
-        # Finally write out the rest of the targets.
-        targetsfile = mockio.findfile('targets', nside, healpix, basedir=output_dir)
-        truthfile = mockio.findfile('truth', nside, healpix, basedir=output_dir)
-   
-        log.info('Writing {} targets to:'.format(nobj))
-        log.info('  {}'.format(targetsfile))
-        targets.meta['EXTNAME'] = 'TARGETS'
-        write_bintable(targetsfile+'.tmp', targets, extname='TARGETS',
-                          header=targetshdr, clobber=True)
-        os.rename(targetsfile+'.tmp', targetsfile)
-
-        log.info('  {}'.format(truthfile))
-        hx = fits.HDUList()
-        hdu = fits.convenience.table_to_hdu(truth)
-        hdu.header['EXTNAME'] = 'TRUTH'
-        hx.append(hdu)
-
-        if len(trueflux) > 0:
-            hdu = fits.ImageHDU(truewave.astype(np.float32),
-                                name='WAVE', header=truthhdr)
-            hdu.header['BUNIT'] = 'Angstrom'
-            hdu.header['AIRORVAC'] = 'vac'
-            hx.append(hdu)
-
-            hdu = fits.ImageHDU(trueflux.astype(np.float32), name='FLUX')
-            hdu.header['BUNIT'] = '1e-17 erg/s/cm2/Angstrom'
-            hx.append(hdu)
-
-        if len(objtruth) > 0:
-            for obj in sorted(set(truth['TEMPLATETYPE'])):
-                hdu = fits.convenience.table_to_hdu(objtruth[obj])
-                hdu.header['EXTNAME'] = 'TRUTH_{}'.format(obj)
-                hx.append(hdu)
-
-        try:
-            hx.writeto(truthfile+'.tmp', overwrite=True)
-        except:
-            hx.writeto(truthfile+'.tmp', clobber=True)
-        os.rename(truthfile+'.tmp', truthfile)
 
 def _merge_file_tables(fileglob, ext, outfile=None, comm=None, addcols=None, overwrite=False):
     '''
@@ -1199,6 +1130,7 @@ def _merge_file_tables(fileglob, ext, outfile=None, comm=None, addcols=None, ove
         rank = 0
 
     if rank == 0:
+        log.info('Generating {} from {} HDU {}'.format(outfile, fileglob, ext))
         infiles = sorted(glob.glob(fileglob))
     else:
         infiles = None
@@ -1207,8 +1139,8 @@ def _merge_file_tables(fileglob, ext, outfile=None, comm=None, addcols=None, ove
         infiles = comm.bcast(infiles, root=0)
  
     if len(infiles)==0:
-        log = get_logger()
-        log.info('Zero pixel files for extension {}. Skipping.'.format(ext))
+        if rank == 0:
+            log.info('Zero pixel files for extension {}. Skipping.'.format(ext))
         return
     
     #- Each rank reads and combines a different set of files
@@ -1239,7 +1171,16 @@ def _merge_file_tables(fileglob, ext, outfile=None, comm=None, addcols=None, ove
             return None
 
         log.info('Writing {} {}'.format(outfile, ext))
-        header = fitsio.read_header(infiles[0], ext)
+        for infile in infiles:
+            try:
+                header = fitsio.read_header(infile, ext)
+            except:
+                header = None
+            if header is not None:
+                break
+
+        if header is None:
+            log.critical('Unable to read FITS header for extension {}'.format(ext))
 
         #- Use tmpout name so interupted I/O doesn't leave a corrupted file
         #- of the correct name
@@ -1300,11 +1241,14 @@ def join_targets_truth(mockdir, outdir=None, overwrite=False, comm=None):
     if rank == 0:
         todo = dict()
         todo['sky'] = not os.path.exists(outdir+'/sky.fits') or overwrite
-        todo['stddark'] = not os.path.exists(outdir+'/standards-dark.fits') or overwrite
-        todo['stdbright'] = not os.path.exists(outdir+'/standards-bright.fits') or overwrite
-        todo['targets'] = not os.path.exists(outdir+'/targets.fits') or overwrite
-        todo['truth'] = not os.path.exists(outdir+'/truth.fits') or overwrite
-        todo['mtl'] = not os.path.exists(outdir+'/mtl.fits') or overwrite
+
+        todo['targets-bright'] = not os.path.exists(outdir+'/targets-bright.fits') or overwrite
+        todo['truth-bright'] = not os.path.exists(outdir+'/truth-bright.fits') or overwrite
+        todo['mtl-bright'] = not os.path.exists(outdir+'/mtl-bright.fits') or overwrite
+
+        todo['targets-dark'] = not os.path.exists(outdir+'/targets-dark.fits') or overwrite
+        todo['truth-dark'] = not os.path.exists(outdir+'/truth-dark.fits') or overwrite
+        todo['mtl-dark'] = not os.path.exists(outdir+'/mtl-dark.fits') or overwrite
     else:
         todo = None
 
@@ -1312,53 +1256,48 @@ def join_targets_truth(mockdir, outdir=None, overwrite=False, comm=None):
         todo = comm.bcast(todo, root=0)
 
     if todo['sky']:
-        _merge_file_tables(mockdir+'/*/*/sky-*.fits', 'SKY',
+        _merge_file_tables(mockdir+'/*/*/sky-*.fits', 'SKY_TARGETS',
                            outfile=outdir+'/sky.fits', comm=comm,
                            overwrite=overwrite,
-                           addcols=dict(OBSCONDITIONS=obsmask.mask('DARK|GRAY|BRIGHT')))
-
-    if todo['stddark']:
-        _merge_file_tables(mockdir+'/*/*/standards-dark*.fits', 'STD',
-                           outfile=outdir+'/standards-dark.fits', comm=comm,
-                           overwrite=overwrite,
-                           addcols=dict(OBSCONDITIONS=obsmask.mask('DARK|GRAY')))
-
-    if todo['stdbright']:
-        _merge_file_tables(mockdir+'/*/*/standards-bright*.fits', 'STD',
-                           outfile=outdir+'/standards-bright.fits', comm=comm,
-                           overwrite=overwrite,
-                           addcols=dict(OBSCONDITIONS=obsmask.mask('BRIGHT')))
-
-    if todo['targets']:
-        _merge_file_tables(mockdir+'/*/*/targets-*.fits', 'TARGETS',
-                           overwrite=overwrite,
-                           outfile=outdir+'/targets.fits', comm=comm)
-
-    if todo['truth']:
-        _merge_file_tables(mockdir+'/*/*/truth-*.fits', 'TRUTH',
-                           overwrite=overwrite,
-                           outfile=outdir+'/truth.fits', comm=comm)
-        # append, not overwrite other per-subclass truth tables
-        for templatetype in ['BGS', 'ELG', 'LRG', 'QSO', 'STAR', 'WD']:
-            extname = 'TRUTH_' + templatetype
-            _merge_file_tables(mockdir+'/*/*/truth-*.fits', extname,
-                               overwrite=False,
-                               outfile=outdir+'/truth.fits', comm=comm)
-
-    #- Make initial merged target list (MTL) using rank 0
-    if rank == 0 and todo['mtl']:
-        from desitarget import mtl
-        from desiutil.log import get_logger
-        log = get_logger()
+                           addcols=dict(
+                               FIBERFLUX_IVAR_G=300.0,
+                               FIBERFLUX_IVAR_R=900.0,
+                               FIBERFLUX_IVAR_Z=130.0)
+                           )
+                           #addcols=dict(OBSCONDITIONS=obsmask.mask('DARK|GRAY|BRIGHT')))
         
-        out_mtl = os.path.join(outdir, 'mtl.fits')
-        log.info('Generating merged target list {}'.format(out_mtl))
-        targets = fitsio.read(outdir+'/targets.fits')
-        mtl = mtl.make_mtl(targets)
-        tmpout = out_mtl+'.tmp'
-        mtl.meta['EXTNAME'] = 'MTL'
-        mtl.write(tmpout, overwrite=True, format='fits')
-        os.rename(tmpout, out_mtl)
+    for obscon in ('bright', 'dark'):
+        if todo['targets-{}'.format(obscon)]:
+            _merge_file_tables(mockdir+'/*/*/{}/targets-*.fits'.format(obscon), 'TARGETS',
+                               overwrite=overwrite,
+                               outfile=outdir+'/targets-{}.fits'.format(obscon), comm=comm)
+
+        if todo['truth-{}'.format(obscon)]:
+            _merge_file_tables(mockdir+'/*/*/{}/truth-*.fits'.format(obscon), 'TRUTH',
+                               overwrite=overwrite,
+                               outfile=outdir+'/truth-{}.fits'.format(obscon), comm=comm)
+            
+            # append, not overwrite other per-subclass truth tables
+            for templatetype in ['BGS', 'ELG', 'LRG', 'QSO', 'STAR', 'WD']:
+                extname = 'TRUTH_' + templatetype
+                _merge_file_tables(mockdir+'/*/*/{}/truth-*.fits'.format(obscon), extname,
+                                   overwrite=False,
+                                   outfile=outdir+'/truth-{}.fits'.format(obscon), comm=comm)
+
+        #- Make initial merged target list (MTL) using rank 0
+        if rank == 0 and todo['mtl-{}'.format(obscon)]:
+            from desitarget import mtl
+            from desiutil.log import get_logger
+            log = get_logger()
+
+            out_mtl = os.path.join(outdir, 'mtl-{}.fits'.format(obscon))
+            log.info('Generating merged target list {}'.format(out_mtl))
+            targets = fitsio.read(outdir+'/targets-{}.fits'.format(obscon))
+            mtl = mtl.make_mtl(targets, obscon=obscon.upper())
+            tmpout = out_mtl+'.tmp'
+            mtl.meta['EXTNAME'] = 'MTL'
+            mtl.write(tmpout, overwrite=True, format='fits')
+            os.rename(tmpout, out_mtl)
 
 
 

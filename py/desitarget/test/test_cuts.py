@@ -12,9 +12,11 @@ from astropy.io import fits
 from astropy.table import Table
 import fitsio
 import numpy as np
+import healpy as hp
 
 from desitarget import io, cuts
 from desitarget.targetmask import desi_mask
+from desitarget.geomask import hp_in_box, pixarea2nside, box_area
 
 
 class TestCuts(unittest.TestCase):
@@ -22,9 +24,28 @@ class TestCuts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.datadir = resource_filename('desitarget.test', 't')
-#        cls.gaiadir = resource_filename('desitarget.test', 'tgaia')
         cls.tractorfiles = sorted(io.list_tractorfiles(cls.datadir))
         cls.sweepfiles = sorted(io.list_sweepfiles(cls.datadir))
+
+        # ADM find which HEALPixels are covered by test sweeps files.
+        cls.nside = 32
+        pixlist = []
+        for fn in cls.sweepfiles:
+            objs = fitsio.read(fn)
+            theta, phi = np.radians(90-objs["DEC"]), np.radians(objs["RA"])
+            pixels = hp.ang2pix(cls.nside, theta, phi, nest=True)
+            pixlist.append(pixels)
+        cls.pix = np.unique(pixlist)
+
+        # ADM set up the GAIA_DIR environment variable.
+        cls.gaiadir_orig = os.getenv("GAIA_DIR")
+        os.environ["GAIA_DIR"] = resource_filename('desitarget.test', 't4')
+
+    @classmethod
+    def tearDownClass(cls):
+        # ADM reset GAIA_DIR environment variable.
+        if cls.gaiadir_orig is not None:
+            os.environ["GAIA_DIR"] = cls.gaiadir_orig
 
     def test_unextinct_fluxes(self):
         """Test function that unextincts fluxes
@@ -79,6 +100,8 @@ class TestCuts(unittest.TestCase):
         zflux = flux['ZFLUX']
         w1flux = flux['W1FLUX']
         w2flux = flux['W2FLUX']
+        zfiberflux = flux['ZFIBERFLUX']
+        rfiberflux = flux['RFIBERFLUX']
 
         gfluxivar = targets['FLUX_IVAR_G']
         rfluxivar = targets['FLUX_IVAR_R']
@@ -106,7 +129,7 @@ class TestCuts(unittest.TestCase):
         gfracin = targets['FRACIN_G']
         rfracin = targets['FRACIN_R']
         zfracin = targets['FRACIN_Z']
-        brightstarinblob = targets['BRIGHTSTARINBLOB']
+        maskbits = targets['MASKBITS']
 
         gaiagmag = targets['GAIA_PHOT_G_MEAN_MAG']
         Grr = gaiagmag - 22.5 + 2.5*np.log10(targets['FLUX_R'])
@@ -116,56 +139,79 @@ class TestCuts(unittest.TestCase):
         else:
             primary = np.ones_like(gflux, dtype='?')
 
-        lrg1 = cuts.isLRG(primary=primary, gflux=gflux, rflux=rflux, zflux=zflux, w1flux=w1flux,
-                          gflux_ivar=gfluxivar, rflux_snr=rsnr, zflux_snr=zsnr, w1flux_snr=w1snr)
-        lrg2 = cuts.isLRG(primary=None, gflux=gflux, rflux=rflux, zflux=zflux, w1flux=w1flux,
-                          gflux_ivar=gfluxivar, rflux_snr=rsnr, zflux_snr=zsnr, w1flux_snr=w1snr)
-        self.assertTrue(np.all(lrg1 == lrg2))
-        # ADM also check that the color selections alone work. This tripped us up once
-        # ADM with the mocks part of the code calling a non-existent LRG colors function.
-        lrg1 = cuts.isLRG_colors(primary=primary, gflux=gflux, rflux=rflux, zflux=zflux,
-                                 w1flux=w1flux, w2flux=w2flux)
-        lrg2 = cuts.isLRG_colors(primary=None, gflux=gflux, rflux=rflux, zflux=zflux,
-                                 w1flux=w1flux, w2flux=w2flux)
-        self.assertTrue(np.all(lrg1 == lrg2))
+        # ADM check for both defined fiberflux and fiberflux of None.
+        for ff in zfiberflux, None:
+            lrg1 = cuts.isLRG(primary=primary, gflux=gflux, rflux=rflux,
+                              zflux=zflux, w1flux=w1flux, zfiberflux=ff,
+                              gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                              maskbits=maskbits,
+                              rflux_snr=rsnr, zflux_snr=zsnr, w1flux_snr=w1snr)
+            lrg2 = cuts.isLRG(primary=None, gflux=gflux, rflux=rflux, zflux=zflux,
+                              w1flux=w1flux, zfiberflux=ff,
+                              gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                              maskbits=maskbits,
+                              rflux_snr=rsnr, zflux_snr=zsnr, w1flux_snr=w1snr)
+            self.assertTrue(np.all(lrg1 == lrg2))
+
+            # ADM also check that the color selections alone work. This tripped us up once
+            # ADM with the mocks part of the code calling a non-existent LRG colors function.
+            lrg1 = cuts.isLRG_colors(primary=primary, gflux=gflux, rflux=rflux,
+                                     zflux=zflux, zfiberflux=ff,
+                                     w1flux=w1flux, w2flux=w2flux)
+            lrg2 = cuts.isLRG_colors(primary=None, gflux=gflux, rflux=rflux,
+                                     zflux=zflux, zfiberflux=ff,
+                                     w1flux=w1flux, w2flux=w2flux)
+            self.assertTrue(np.all(lrg1 == lrg2))
 
         elg1 = cuts.isELG(gflux=gflux, rflux=rflux, zflux=zflux,
-                          gallmask=gallmask, rallmask=rallmask, zallmask=zallmask,
-                          brightstarinblob=brightstarinblob, primary=primary)
+                          gsnr=gsnr, rsnr=rsnr, zsnr=zsnr,
+                          gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                          maskbits=maskbits, primary=primary)
         elg2 = cuts.isELG(gflux=gflux, rflux=rflux, zflux=zflux,
-                          gallmask=gallmask, rallmask=rallmask, zallmask=zallmask,
-                          brightstarinblob=brightstarinblob, primary=None)
+                          gsnr=gsnr, rsnr=rsnr, zsnr=zsnr,
+                          gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                          maskbits=maskbits, primary=None)
         self.assertTrue(np.all(elg1 == elg2))
 
         elg1 = cuts.isELG_colors(gflux=gflux, rflux=rflux, zflux=zflux, primary=primary)
         elg2 = cuts.isELG_colors(gflux=gflux, rflux=rflux, zflux=zflux, primary=None)
         self.assertTrue(np.all(elg1 == elg2))
 
-        for targtype in ["bright", "faint", "wise"]:
-            bgs = []
-            for primary in [primary, None]:
-                bgs.append(
-                    cuts.isBGS(gflux=gflux, rflux=rflux, zflux=zflux, w1flux=w1flux, w2flux=w2flux,
-                               gnobs=gnobs, rnobs=rnobs, znobs=znobs,
-                               gfracmasked=gfracmasked, rfracmasked=rfracmasked, zfracmasked=zfracmasked,
-                               gfracflux=gfracflux, rfracflux=rfracflux, zfracflux=zfracflux,
-                               gfracin=gfracin, rfracin=rfracin, zfracin=zfracin,
-                               gfluxivar=gfluxivar, rfluxivar=rfluxivar, zfluxivar=zfluxivar,
-                               brightstarinblob=brightstarinblob, Grr=Grr, w1snr=w1snr, gaiagmag=gaiagmag,
-                               primary=primary, targtype=targtype)
-                )
-            self.assertTrue(np.all(bgs[0] == bgs[1]))
+        # ADM check for both defined fiberflux and fiberflux of None.
+        for ff in rfiberflux, None:
+            for targtype in ["bright", "faint", "wise"]:
+                bgs = []
+                for prim in [primary, None]:
+                    bgs.append(
+                        cuts.isBGS(
+                            rfiberflux=ff, gflux=gflux, rflux=rflux,
+                            zflux=zflux, w1flux=w1flux, w2flux=w2flux,
+                            gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                            gfracmasked=gfracmasked, rfracmasked=rfracmasked,
+                            zfracmasked=zfracmasked, gfracflux=gfracflux,
+                            rfracflux=rfracflux, zfracflux=zfracflux,
+                            gfracin=gfracin, rfracin=rfracin, zfracin=zfracin,
+                            gfluxivar=gfluxivar, rfluxivar=rfluxivar,
+                            zfluxivar=zfluxivar, maskbits=maskbits,
+                            Grr=Grr, w1snr=w1snr, gaiagmag=gaiagmag,
+                            primary=prim, targtype=targtype)
+                    )
+                self.assertTrue(np.all(bgs[0] == bgs[1]))
 
         # ADM need to include RELEASE for quasar cuts, at least.
         release = targets['RELEASE']
         # - Test that objtype and primary are optional
         psftype = targets['TYPE']
-        qso1 = cuts.isQSO_cuts(gflux=gflux, rflux=rflux, zflux=zflux, w1flux=w1flux, w2flux=w2flux,
-                               deltaChi2=deltaChi2, brightstarinblob=brightstarinblob,
+        qso1 = cuts.isQSO_cuts(gflux=gflux, rflux=rflux, zflux=zflux,
+                               w1flux=w1flux, w2flux=w2flux,
+                               gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                               deltaChi2=deltaChi2, maskbits=maskbits,
                                w1snr=w1snr, w2snr=w2snr, objtype=psftype, primary=primary,
                                release=release)
-        qso2 = cuts.isQSO_cuts(gflux=gflux, rflux=rflux, zflux=zflux, w1flux=w1flux, w2flux=w2flux,
-                               deltaChi2=deltaChi2, brightstarinblob=brightstarinblob,
+        qso2 = cuts.isQSO_cuts(gflux=gflux, rflux=rflux, zflux=zflux,
+                               w1flux=w1flux, w2flux=w2flux,
+                               gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                               deltaChi2=deltaChi2, maskbits=maskbits,
                                w1snr=w1snr, w2snr=w2snr, objtype=None, primary=None,
                                release=release)
         self.assertTrue(np.all(qso1 == qso2))
@@ -185,6 +231,10 @@ class TestCuts(unittest.TestCase):
         # ADM only test the ELG cuts for speed. There's a
         # ADM full run through all classes in test_cuts_basic.
         tc = ["ELG"]
+        # ADM add the DR7/DR8 data columns if they aren't there yet.
+        # ADM can remove this once DR8 is finalized.
+        if "MASKBITS" not in targets.dtype.names:
+            targets = io.add_dr8_columns(targets)
 
         self.assertFalse(cuts._is_row(targets))
         self.assertTrue(cuts._is_row(targets[0]))
@@ -220,14 +270,19 @@ class TestCuts(unittest.TestCase):
     def test_select_targets(self):
         """Test select targets works with either data or filenames
         """
-        # ADM only test the ELG cuts for speed. There's a
+        # ADM only test the LRG cuts for speed. There's a
         # ADM full run through all classes in test_cuts_basic.
         tc = ["LRG"]
 
         for filelist in [self.tractorfiles, self.sweepfiles]:
-            targets = cuts.select_targets(filelist, numproc=1, tcnames=tc)
-            t1 = cuts.select_targets(filelist[0:1], numproc=1, tcnames=tc)
-            t2 = cuts.select_targets(filelist[0], numproc=1, tcnames=tc)
+            # ADM set backup to False as the Gaia unit test
+            # ADM files only cover a limited pixel range.
+            targets = cuts.select_targets(filelist, numproc=1, tcnames=tc,
+                                          backup=False)
+            t1 = cuts.select_targets(filelist[0:1], numproc=1, tcnames=tc,
+                                     backup=False)
+            t2 = cuts.select_targets(filelist[0], numproc=1, tcnames=tc,
+                                     backup=False)
             for col in t1.dtype.names:
                 try:
                     notNaN = ~np.isnan(t1[col])
@@ -236,34 +291,6 @@ class TestCuts(unittest.TestCase):
 
                 self.assertTrue(np.all(t1[col][notNaN] == t2[col][notNaN]))
 
-    @unittest.skip("The sandbox isn't used much, we will probably deprecate it.")
-    def test_select_targets_sandbox(self):
-        """Test sandbox cuts at least don't crash
-        """
-        from desitarget import sandbox
-        ntot = 0
-        for filename in self.tractorfiles+self.sweepfiles:
-            targets = cuts.select_targets(filename, numproc=1, sandbox=True)
-            objects = Table.read(filename)
-            if 'BRICK_PRIMARY' in objects.colnames:
-                objects.remove_column('BRICK_PRIMARY')
-            desi_target, bgs_target, mws_target = \
-                sandbox.cuts.apply_sandbox_cuts(objects)
-            n = np.count_nonzero(desi_target) + \
-                np.count_nonzero(bgs_target) + \
-                np.count_nonzero(mws_target)
-            self.assertEqual(len(targets), n)
-            ntot += n
-        self.assertGreater(ntot, 0, 'No targets selected by sandbox.cuts')
-
-    def test_check_targets(self):
-        """Test code that checks files for corruption
-        """
-        for filelist in self.tractorfiles:
-            nbadfiles = cuts.check_input_files(filelist, numproc=1)
-
-            self.assertTrue(nbadfiles == 0)
-
     def test_qso_selection_options(self):
         """Test the QSO selection options are passed correctly
         """
@@ -271,11 +298,13 @@ class TestCuts(unittest.TestCase):
 
         targetfile = self.tractorfiles[0]
         for qso_selection in cuts.qso_selection_options:
-            results = cuts.select_targets(targetfile,
+            # ADM set backup to False as the Gaia unit test
+            # ADM files only cover a limited pixel range.
+            results = cuts.select_targets(targetfile, backup=False,
                                           tcnames=tc, qso_selection=qso_selection)
 
         with self.assertRaises(ValueError):
-            results = cuts.select_targets(targetfile, numproc=1,
+            results = cuts.select_targets(targetfile, numproc=1, backup=False,
                                           tcnames=tc, qso_selection='blatfoo')
 
     def test_bgs_target_types(self):
@@ -302,7 +331,9 @@ class TestCuts(unittest.TestCase):
 
         for nproc in [1, 2]:
             for filelist in [self.tractorfiles, self.sweepfiles]:
-                targets = cuts.select_targets(filelist,
+                # ADM set backup to False as the Gaia unit test
+                # ADM files only cover a limited pixel range.
+                targets = cuts.select_targets(filelist, backup=False,
                                               numproc=nproc, tcnames=tc)
                 self.assertTrue('DESI_TARGET' in targets.dtype.names)
                 self.assertTrue('BGS_TARGET' in targets.dtype.names)
@@ -312,6 +343,92 @@ class TestCuts(unittest.TestCase):
                 bgs1 = (targets['DESI_TARGET'] & desi_mask.BGS_ANY) != 0
                 bgs2 = targets['BGS_TARGET'] != 0
                 self.assertTrue(np.all(bgs1 == bgs2))
+
+    def test_backup(self):
+        """Test BACKUP targets are selected.
+        """
+        # ADM only test the ELG, BGS cuts for speed. There's a
+        # ADM full run through all classes in test_cuts_basic.
+        tc = ["ELG", "BGS"]
+
+        # ADM BACKUP targets can only run on the sweep files.
+        for filelist in self.sweepfiles:
+            # ADM limit to pixels covered in the Gaia unit test files.
+            targets = cuts.select_targets(filelist, numproc=1, tcnames=tc,
+                                          nside=self.nside, pixlist=self.pix)
+            self.assertTrue('DESI_TARGET' in targets.dtype.names)
+            self.assertTrue('BGS_TARGET' in targets.dtype.names)
+            self.assertTrue('MWS_TARGET' in targets.dtype.names)
+            self.assertEqual(len(targets), np.count_nonzero(targets['DESI_TARGET']))
+
+            bgs1 = (targets['DESI_TARGET'] & desi_mask.BGS_ANY) != 0
+            bgs2 = targets['BGS_TARGET'] != 0
+            self.assertTrue(np.all(bgs1 == bgs2))
+
+    def test_targets_spatial(self):
+        """Test applying RA/Dec/HEALpixel inputs to sweeps recovers same targets
+        """
+        # ADM only test some of the galaxy cuts for speed. There's a
+        # ADM full run through all classes in test_cuts_basic.
+        tc = ["LRG", "ELG", "BGS"]
+        infiles = self.sweepfiles[2]
+
+        # ADM set backup to False as the Gaia unit test
+        # ADM files only cover a limited pixel range.
+        targets = cuts.select_targets(infiles, numproc=1, tcnames=tc,
+                                      backup=False)
+
+        # ADM test the RA/Dec box input.
+        radecbox = [np.min(targets["RA"])-0.01, np.max(targets["RA"])+0.01,
+                    np.min(targets["DEC"])-0.01, np.max(targets["DEC"]+0.01)]
+        t1 = cuts.select_targets(infiles, numproc=1, tcnames=tc,
+                                 radecbox=radecbox, backup=False)
+
+        # ADM test the RA/Dec/radius cap input.
+        centra, centdec = 0.5*(radecbox[0]+radecbox[1]), 0.5*(radecbox[2]+radecbox[3])
+        # ADM 20 degrees should be a large enough radius for the sweeps.
+        maxrad = 20.
+        radecrad = centra, centdec, maxrad
+        t2 = cuts.select_targets(infiles, numproc=1, tcnames=tc,
+                                 radecrad=radecrad, backup=False)
+
+        # ADM test the pixel input.
+        nside = pixarea2nside(box_area(radecbox))
+        pixlist = hp_in_box(nside, radecbox)
+        t3 = cuts.select_targets(infiles, numproc=1, tcnames=tc,
+                                 nside=nside, pixlist=pixlist, backup=False)
+
+        # ADM sort each set of targets on TARGETID to compare them.
+        targets = targets[np.argsort(targets["TARGETID"])]
+        t1 = t1[np.argsort(t1["TARGETID"])]
+        t2 = t2[np.argsort(t2["TARGETID"])]
+        t3 = t3[np.argsort(t3["TARGETID"])]
+
+        # ADM test the same targets were recovered and that
+        # ADM each recovered target has the same bits set.
+        for targs in t1, t2, t3:
+            for col in "TARGETID", "DESI_TARGET", "BGS_TARGET", "MWS_TARGET":
+                self.assertTrue(np.all(targs[col] == targets[col]))
+
+    def test_targets_spatial_inputs(self):
+        """Test the code fails if more than one spatial input is passed
+        """
+        # ADM set up some fake inputs.
+        pixlist = [0, 1]
+        radecbox = [2, 3, 4, 5]
+        radecrad = [6, 7, 8]
+        # ADM we should throw an error every time we pass 2 inputs that aren't NoneType.
+        timesthrown = 0
+        for i in range(3):
+            inputs = [pixlist, radecbox, radecrad]
+            inputs[i] = None
+            try:
+                cuts.select_targets(self.sweepfiles, numproc=1,
+                                    pixlist=inputs[0], radecbox=inputs[1], radecrad=inputs[2])
+            except ValueError:
+                timesthrown += 1
+
+        self.assertEqual(timesthrown, 3)
 
 
 if __name__ == '__main__':

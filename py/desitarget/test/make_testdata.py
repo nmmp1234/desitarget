@@ -3,7 +3,7 @@
 # ADM file subsets for testing.
 # - The hardcoded paths are for NERSC, but you can swap out any
 # - legacy survey data release path as needed.
-# ADM Now (08/01/18) based off DR7 sweeps and Tractor files.
+# ADM Now (10/04/19) based off DR8 sweeps and Tractor files.
 
 import fitsio
 import numpy as np
@@ -20,7 +20,8 @@ from desitarget.QA import _load_systematics
 # from desitarget.gaiamatch import find_gaia_files
 
 start = time()
-tractordir = '/project/projectdirs/cosmo/data/legacysurvey/dr7/tractor/330/'
+tractordir = '/project/projectdirs/cosmo/data/legacysurvey/dr8/south/tractor/330/'
+# tractordir = '/project/projectdirs/cosmo/data/legacysurvey/dr7/tractor/330/'
 # tractordir = '/project/projectdirs/cosmo/data/legacysurvey/dr3.1/tractor/330'
 # tractordir = '/data/legacysurvey/dr3.1/tractor/330/'
 for brick in ['3301m002', '3301m007', '3303p000']:
@@ -48,7 +49,8 @@ for brick in ['3301m002', '3301m007', '3303p000']:
     fitsio.write('t/'+basename(filepath), data[keep], header=hdr, clobber=True)
     print('made Tractor file for brick {}...t={:.2f}s'.format(brick, time()-start))
 
-sweepdir = '/project/projectdirs/cosmo/data/legacysurvey/dr7/sweep/7.1/'
+sweepdir = '/project/projectdirs/cosmo/data/legacysurvey/dr8/south/sweep/8.0/'
+# sweepdir = '/project/projectdirs/cosmo/data/legacysurvey/dr7/sweep/7.1/'
 # sweepdir = '/project/projectdirs/cosmo/data/legacysurvey/dr3.1/sweep/3.1'
 # sweepdir = '/data/legacysurvey/dr2p/sweep/'
 for radec in ['310m005-320p000', '320m005-330p000', '330m005-340p000']:
@@ -82,7 +84,7 @@ cmx_targets = finalize(data[keep], desi_target[keep],
 # ADM remove some columns from the target file that aren't needed for
 # ADM testing. It's a big file.
 needtargs = np.empty(
-    len(many), dtype=[('RA', '>f8'), ('DEC', '>f8'),
+    len(many), dtype=[('RA', '>f8'), ('DEC', '>f8'), ('RELEASE', '>i2'),
                       ('FLUX_G', '>f4'), ('FLUX_R', '>f4'), ('FLUX_Z', '>f4'),
                       ('FLUX_W1', '>f4'), ('FLUX_W2', '>f4'), ('MW_TRANSMISSION_G', '>f4'),
                       ('MW_TRANSMISSION_R', '>f4'), ('MW_TRANSMISSION_Z', '>f4'),
@@ -92,8 +94,8 @@ needtargs = np.empty(
 )
 for col in needtargs.dtype.names:
     needtargs[col] = targets[col]
-fitsio.write('t/targets.fits', needtargs, header=hdr, clobber=True)
-fitsio.write('t/cmx-targets.fits', cmx_targets, header=hdr, clobber=True)
+fitsio.write('t/targets.fits', needtargs, extname='TARGETS', header=hdr, clobber=True)
+fitsio.write('t/cmx-targets.fits', cmx_targets, extname='TARGETS', header=hdr, clobber=True)
 
 # ADM as of DR7, ignore the Gaia files
 # ADM adding Gaia files to which to match

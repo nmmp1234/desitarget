@@ -62,12 +62,6 @@ desitarget API
 .. automodule:: desitarget.QA
     :members:
 
-.. automodule:: desitarget.sandbox
-    :members:
-
-.. automodule:: desitarget.sandbox.cuts
-    :members:
-
 .. automodule:: desitarget.skyfibers
     :members:
 
@@ -87,4 +81,7 @@ desitarget API
     :members:
 
 .. automodule:: desitarget.train.train_mva_decals
+    :members:
+
+.. automodule:: desitarget.uratmatch
     :members:

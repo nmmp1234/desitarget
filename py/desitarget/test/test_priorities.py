@@ -27,6 +27,7 @@ class TestPriorities(unittest.TestCase):
             ('Z', np.float32),
             ('ZWARN', np.float32),
             ('NUMOBS', np.float32),
+            ('SPECTYPE', np.str)
         ]
 
         n = 3
@@ -55,75 +56,91 @@ class TestPriorities(unittest.TestCase):
             desi_mask, bgs_mask, mws_mask = masks
 
             # - No targeting bits set is priority=0
-            self.assertTrue(np.all(calc_priority(t, z) == 0))
+            self.assertTrue(np.all(calc_priority(t, z, "BRIGHT") == 0))
 
-            # - test QSO > (LRG_1PASS | LRG_2PASS) > ELG
+            # ADM test QSO > LRG > ELG for main survey and SV.
             t[desi_target] = desi_mask.ELG
-            self.assertTrue(np.all(calc_priority(t, z) == desi_mask.ELG.priorities['UNOBS']))
-            t[desi_target] |= desi_mask.LRG_1PASS
-            self.assertTrue(np.all(calc_priority(t, z) == desi_mask.LRG.priorities['UNOBS']))
-            t[desi_target] |= desi_mask.LRG_2PASS
-            self.assertTrue(np.all(calc_priority(t, z) == desi_mask.LRG.priorities['UNOBS']))
+            self.assertTrue(np.all(calc_priority(
+                t, z, "GRAY|DARK") == desi_mask.ELG.priorities['UNOBS']))
+            t[desi_target] |= desi_mask.LRG
+            self.assertTrue(np.all(calc_priority(
+                t, z, "GRAY|DARK") == desi_mask.LRG.priorities['UNOBS']))
             t[desi_target] |= desi_mask.QSO
-            self.assertTrue(np.all(calc_priority(t, z) == desi_mask.QSO.priorities['UNOBS']))
+            self.assertTrue(np.all(calc_priority(
+                t, z, "GRAY|DARK") == desi_mask.QSO.priorities['UNOBS']))
 
             # - different states -> different priorities
-
             # - Done is Done, regardless of ZWARN.
             t[desi_target] = desi_mask.ELG
             t["PRIORITY_INIT"], t["NUMOBS_INIT"] = initial_priority_numobs(t)
             z['NUMOBS'] = [0, 1, 1]
             z['ZWARN'] = [1, 1, 0]
-            p = make_mtl(t, z)["PRIORITY"]
+            p = make_mtl(t, "GRAY|DARK", zcat=z)["PRIORITY"]
 
             self.assertEqual(p[0], desi_mask.ELG.priorities['UNOBS'])
             self.assertEqual(p[1], desi_mask.ELG.priorities['DONE'])
             self.assertEqual(p[2], desi_mask.ELG.priorities['DONE'])
 
-            # - BGS FAINT targets are never DONE, only MORE_ZGOOD.
+            # ADM In BRIGHT conditions BGS FAINT targets are
+            # ADM never DONE, only MORE_ZGOOD.
             t[desi_target] = desi_mask.BGS_ANY
             t[bgs_target] = bgs_mask.BGS_FAINT
             t["PRIORITY_INIT"], t["NUMOBS_INIT"] = initial_priority_numobs(t)
             z['NUMOBS'] = [0, 1, 1]
             z['ZWARN'] = [1, 1, 0]
-            p = make_mtl(t, z)["PRIORITY"]
+            p = make_mtl(t, "BRIGHT", zcat=z)["PRIORITY"]
 
             self.assertEqual(p[0], bgs_mask.BGS_FAINT.priorities['UNOBS'])
             self.assertEqual(p[1], bgs_mask.BGS_FAINT.priorities['MORE_ZWARN'])
             self.assertEqual(p[2], bgs_mask.BGS_FAINT.priorities['MORE_ZGOOD'])
             # BGS_FAINT: {UNOBS: 2000, MORE_ZWARN: 2000, MORE_ZGOOD: 1000, DONE: 2, OBS: 1, DONOTOBSERVE: 0}
 
-            # - BGS BRIGHT targets are never DONE, only MORE_ZGOOD.
+            # ADM but in DARK conditions, BGS_FAINT should behave as
+            # ADM for other target classes.
+            z = self.zcat.copy()
+            z['NUMOBS'] = [0, 1, 1]
+            z['ZWARN'] = [1, 1, 0]
+            p = make_mtl(t, "DARK|GRAY", zcat=z)["PRIORITY"]
+
+            self.assertEqual(p[0], bgs_mask.BGS_FAINT.priorities['UNOBS'])
+            self.assertEqual(p[1], bgs_mask.BGS_FAINT.priorities['DONE'])
+            self.assertEqual(p[2], bgs_mask.BGS_FAINT.priorities['DONE'])
+
+            # ADM In BRIGHT conditions BGS BRIGHT targets are
+            # ADM never DONE, only MORE_ZGOOD.
             t[desi_target] = desi_mask.BGS_ANY
             t[bgs_target] = bgs_mask.BGS_BRIGHT
             t["PRIORITY_INIT"], t["NUMOBS_INIT"] = initial_priority_numobs(t)
             z['NUMOBS'] = [0, 1, 1]
             z['ZWARN'] = [1, 1, 0]
-            p = make_mtl(t, z)["PRIORITY"]
+            p = make_mtl(t, "BRIGHT", zcat=z)["PRIORITY"]
 
             self.assertEqual(p[0], bgs_mask.BGS_BRIGHT.priorities['UNOBS'])
             self.assertEqual(p[1], bgs_mask.BGS_BRIGHT.priorities['MORE_ZWARN'])
             self.assertEqual(p[2], bgs_mask.BGS_BRIGHT.priorities['MORE_ZGOOD'])
             # BGS_BRIGHT: {UNOBS: 2100, MORE_ZWARN: 2100, MORE_ZGOOD: 1000, DONE: 2, OBS: 1, DONOTOBSERVE: 0}
 
-            # BGS targets are NEVER done even after 100 observations
+            # ADM In BRIGHT conditions BGS targets are
+            # ADM NEVER done even after 100 observations
             t[desi_target] = desi_mask.BGS_ANY
             t[bgs_target] = bgs_mask.BGS_BRIGHT
             t["PRIORITY_INIT"], t["NUMOBS_INIT"] = initial_priority_numobs(t)
             z['NUMOBS'] = [0, 100, 100]
             z['ZWARN'] = [1,   1,   0]
-            p = calc_priority(t, z)
+            p = calc_priority(t, z, "BRIGHT")
 
             self.assertEqual(p[0], bgs_mask.BGS_BRIGHT.priorities['UNOBS'])
             self.assertEqual(p[1], bgs_mask.BGS_BRIGHT.priorities['MORE_ZWARN'])
             self.assertEqual(p[2], bgs_mask.BGS_BRIGHT.priorities['MORE_ZGOOD'])
 
             # BGS ZGOOD targets always have lower priority than MWS targets that
-            # are not DONE.
+            # are not DONE. Exempting the MWS "BACKUP" targets.
             # ADM first discard N/S informational bits from bitmask as these
             # ADM should never trump the other bits.
-            bgs_names = [name for name in bgs_mask.names() if 'NORTH' not in name and 'SOUTH' not in name]
-            mws_names = [name for name in mws_mask.names() if 'NORTH' not in name and 'SOUTH' not in name]
+            bgs_names = [name for name in bgs_mask.names() if 'NORTH' not in name
+                         and 'SOUTH' not in name]
+            mws_names = [name for name in mws_mask.names() if 'NORTH' not in name
+                         and 'SOUTH' not in name and 'BACKUP' not in name]
 
             lowest_bgs_priority_zgood = min([bgs_mask[n].priorities['MORE_ZGOOD'] for n in bgs_names])
 
@@ -143,16 +160,17 @@ class TestPriorities(unittest.TestCase):
         t['DESI_TARGET'][0] = desi_mask.ELG
         t['DESI_TARGET'][1] = desi_mask.ELG | desi_mask.NEAR_BRIGHT_OBJECT
         t['DESI_TARGET'][2] = desi_mask.ELG | desi_mask.IN_BRIGHT_OBJECT
-        p = calc_priority(t, z)
+        p = calc_priority(t, z, "BRIGHT|GRAY|DARK")
         self.assertEqual(p[0], p[1], "NEAR_BRIGHT_OBJECT shouldn't impact priority but {} != {}".format(p[0], p[1]))
         self.assertEqual(p[2], -1, "IN_BRIGHT_OBJECT priority not -1")
 
     def test_mask_priorities(self):
         for mask in [desi_mask, bgs_mask, mws_mask]:
             for name in mask.names():
-                if name.startswith('STD') or name in ['BGS_ANY', 'MWS_ANY', 'SECONDARY_ANY',
-                                                      'IN_BRIGHT_OBJECT', 'NEAR_BRIGHT_OBJECT',
-                                                      'BRIGHT_OBJECT', 'SKY', 'SV', 'NO_TARGET']:
+                if (
+                        name.startswith('STD') or name.endswith('BRIGHT_OBJECT') or name in
+                        ['BGS_ANY', 'MWS_ANY', 'SCND_ANY', 'SKY', 'SUPP_SKY', 'NO_TARGET']
+                ):
                     self.assertEqual(mask[name].priorities, {}, 'mask.{} has priorities?'.format(name))
                 else:
                     for state in obsmask.names():
@@ -171,7 +189,7 @@ class TestPriorities(unittest.TestCase):
         t.remove_column('MWS_TARGET')
 
         # - No targeting bits set is priority=0
-        self.assertTrue(np.all(calc_priority(t, z) == 0))
+        self.assertTrue(np.all(calc_priority(t, z, "GRAY|DARK") == 0))
 
         # ADM retrieve the cmx_mask.
         colnames, masks, _ = main_cmx_or_sv(t)
@@ -180,7 +198,8 @@ class TestPriorities(unittest.TestCase):
         # ADM test handling of unobserved SV0_BGS and SV0_MWS.
         for name in ["SV0_BGS", "SV0_MWS"]:
             t['CMX_TARGET'] = cmx_mask[name]
-            self.assertTrue(np.all(calc_priority(t, z) == cmx_mask[name].priorities['UNOBS']))
+            self.assertTrue(np.all(calc_priority(
+                t, z, "GRAY|DARK") == cmx_mask[name].priorities['UNOBS']))
 
         # ADM done is Done, regardless of ZWARN.
         for name in ["SV0_BGS", "SV0_MWS"]:
@@ -188,7 +207,7 @@ class TestPriorities(unittest.TestCase):
             t["PRIORITY_INIT"], t["NUMOBS_INIT"] = initial_priority_numobs(t)
             z['NUMOBS'] = [0, 1, 1]
             z['ZWARN'] = [1, 1, 0]
-            p = make_mtl(t, z)["PRIORITY"]
+            p = make_mtl(t, "GRAY|DARK", zcat=z)["PRIORITY"]
 
             self.assertEqual(p[0], cmx_mask[name].priorities['UNOBS'])
             self.assertEqual(p[1], cmx_mask[name].priorities['DONE'])

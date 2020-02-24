@@ -2,9 +2,480 @@
 desitarget Change Log
 =====================
 
-0.27.1 (unreleased)
+0.36.1 (unreleased)
 -------------------
 
+* Changes in CMX after running code for Mini-SV [`PR #592`_]. Includes:
+    * g/G >= 16 for `SV0_BGS`/`SV0_MWS`/`SV0_WD`/`MINI_SV_BGS_BRIGHT`.
+    * Remove the LRG `LOWZ_FILLER` class (both in SV and CMX).
+    * Mask on `bright` in `MASKBITS` for z~5 QSOs (both in SV and CMX).
+    * Remove the 'low quality' (`lowq`) component of `SV0_BGS`.
+    * Add optical `MASKBITS` flags for LRGs (in Main Survey, SV and CMX).
+
+.. _`PR #592`: https://github.com/desihub/desitarget/pull/592
+
+0.36.0 (2020-02-16)
+-------------------
+
+* Add Main Survey LRG/ELG/QSO/BGS cuts to CMX for Mini-SV [`PR #590`_].
+* Cut on NOBS > 0 for QSOs and LRGs for Main Survey and SV [`PR #589`_].
+* Fix bug when adding LSLGA galaxies into Main Survey BGS [`PR #588`_]:
+    * Catch cases of bytes/str types as well as zero-length strings.
+* Noting (here) that we used the BFG to excise lots of junk [`PR #587`_].
+* Updates and fixes to QA for DR9 [`PR #584`_]. Includes:
+    * Options to pre-process and downsample input files to speed testing.
+    * Better labeling of QA output, including cleaning up labeling bugs.
+    * Make points in scatter plots black to contrast with blue contours.
+    * Smarter clipping of dense pixels in histogram plots and sky maps.
+    * Print out densest pixels for each target class, with viewer links.
+* Update BGS Main target selection as stated in [`PR #581`_]. Includes:
+    * Changes in Fibre Magnitude Cut.
+    * LSLGA galaxies manually added to BGS.
+        * Future-proof LSLGA object references changing ('L2' --> 'LX').
+    * 'REF_CAT' information passed to throught '_prepare_optical_wise'.
+* Tune QSO SV selection for both North and South for dr9d [`PR #580`_].
+
+.. _`PR #580`: https://github.com/desihub/desitarget/pull/580
+.. _`PR #581`: https://github.com/desihub/desitarget/pull/581
+.. _`PR #584`: https://github.com/desihub/desitarget/pull/584
+.. _`PR #587`: https://github.com/desihub/desitarget/pull/587
+.. _`PR #588`: https://github.com/desihub/desitarget/pull/588
+.. _`PR #589`: https://github.com/desihub/desitarget/pull/589
+.. _`PR #590`: https://github.com/desihub/desitarget/pull/590
+
+0.35.3 (2020-02-03)
+-------------------
+
+* Further fixes for DR9 [`PR #579`_]. Includes:
+    * Add ``SERSIC`` columns for the DR9 data model.
+    * Read the bricks file in lower-case in :func:`get_brick_info()`:
+        * As, during DR9 testing, it's been both upper- and lower-case.
+    * Set the default ``nside`` to ``None`` for the randoms:
+        * To force the user to choose an ``nside``, or fail otherwise.
+    * Fix a numpy future/deprecation warning.
+* Load yaml config file safely in ``mpi_select_mock_targets`` [`PR #577`_].
+* Fix bugs in updating primary targets with secondary bits set [`PR #574`_].
+* Adds more stellar SV targets [`PR #574`_].
+* Add LyA features to ``select_mock_targets`` [`PR #565`_].
+
+.. _`PR #565`: https://github.com/desihub/desitarget/pull/565
+.. _`PR #574`: https://github.com/desihub/desitarget/pull/574
+.. _`PR #577`: https://github.com/desihub/desitarget/pull/577
+.. _`PR #579`: https://github.com/desihub/desitarget/pull/579
+
+0.35.2 (2019-12-20)
+-------------------
+
+* Fix z~5 QSO bug in CMX/SV0 that was already fixed for SV [`PR #576`_].
+
+.. _`PR #576`: https://github.com/desihub/desitarget/pull/576
+
+0.35.1 (2019-12-16)
+-------------------
+
+* Fix bugs triggered by empty files or regions of the sky [`PR #575`_].
+
+.. _`PR #575`: https://github.com/desihub/desitarget/pull/575
+
+0.35.0 (2019-12-15)
+-------------------
+
+* Preparation for DR9 [`PR #573`_]. Includes:
+    * Update data model, maintaining backwards compatibility with DR8.
+    * Don't set the ``SKY`` bit when setting the ``SUPP_SKY`` bit.
+    * Users can input a seed (1, 2, 3, etc.) to ``bin/select_randoms``:
+        * This user-provided seed is added to the output file name.
+        * Facilitates generating a range of numbered random catalogs.
+    * Write out final secondaries using :func:`io.find_target_files()`.
+* More clean-up of glitches and minor bugs [`PR #570`_]. Includes:
+    * Remove Python 3.5 unit tests.
+    * Catch AssertionError if NoneType input directory when writing.
+        * Later (correctly) updated to AttributeError directly in master.
+    * Assert the data model when reading secondary target files.
+    * Use io.find_target_files() to name priminfo file for secondaries.
+    * Allow N < 16 nodes when bundling files for slurm.
+    * Use the DR14Q file for SV, not the DR16Q file.
+* Fix bug where wrong SNRs were passed to z~5 QSO selection [`PR #569`_].
+* General clean-up of glitches and minor bugs [`PR #564`_]. Includes:
+    * Don't include BACKUP targets in the pixweight files.
+    * Correctly write all all-sky pixels outside of the Legacy Surveys.
+    * Propagate flags like --nosec, --nobackup, --tcnames when bundling.
+    * Write --tcnames options to header of output target files.
+    * Deprecate the sandbox and file-format-check function.
+    * Find LSLGAs using 'L' in `REF_CAT` not 'L2' (to prepare for 'L3').
+    * Refactor to guard against future warnings and overflow warnings.
+    * Return all HEALpixels at `nside` in :func:`sweep_files_touch_hp()`.
+* Strict ``NoneType`` checking and testing for fiberfluxes [`PR #563`_]:
+    * Useful to ensure ongoing compatibility with the mocks.
+* Bitmasks (1,12,13), rfiberflux cut for BGS Main Survey [`PR #562`_].
+* Implement a variety of fixes to `select_mock_targets` [`PR #561`_].
+* Fixes and updates to ``secondary.py`` [`PR #530`_]:
+    * Fix a bug that led to incorrect ``OBSCONDITIONS`` for secondary-only
+      targets.
+    * Secondary target properties can override matched primary properties,
+      but only for restricted combinations of DESI_TARGET bits (MWS and STD).
+* Add stellar SV targets [`PR #530`_]:
+    * Add MWS SV target definitions in ``sv1_targetmask`` and ``cuts``.
+    * Science WDs are now a secondary target class.
+    * Adds a bright limit to the ``MWS-NEARBY`` sample.
+    * Add stellar SV secondary targets in ``sv1_targetmask``.
+    * Remove the ``BACKSTOP`` secondary bit.
+
+.. _`PR #530`: https://github.com/desihub/desitarget/pull/530
+.. _`PR #561`: https://github.com/desihub/desitarget/pull/561
+.. _`PR #562`: https://github.com/desihub/desitarget/pull/562
+.. _`PR #563`: https://github.com/desihub/desitarget/pull/563
+.. _`PR #564`: https://github.com/desihub/desitarget/pull/564
+.. _`PR #569`: https://github.com/desihub/desitarget/pull/569
+.. _`PR #570`: https://github.com/desihub/desitarget/pull/570
+.. _`PR #573`: https://github.com/desihub/desitarget/pull/573
+
+0.34.0 (2019-11-03)
+-------------------
+
+* Update SV0 (BGS, ELG, LRG, QSO) classes for commissioning [`PR #560`_].
+    * Also add new ``STD_DITHER`` target class for commissioning.
+* All-sky/backup targets, new output data model [`PR #558`_]. Includes:
+    * Add all-sky/backup/supplemental targets for SV.
+    * Add all-sky/backup/supplemental targets for the Main survey.
+    * Write dark/bright using, e.g. `targets/dark/targets-*.fits` format.
+    * New `targets/targets-supp/targets-*.fits` format for output.
+    * Add :func:`io.find_target_files()` to parse output data model.
+    * File names now generated automatically in `io.write_*` functions:
+        * File-name-generation used by randoms, skies, targets and gfas.
+        * `select_*` binaries for these classes use this functionality.
+    * Change CMX ``BACKUP_FAINT`` limit to G < 19.
+
+.. _`PR #558`: https://github.com/desihub/desitarget/pull/558
+.. _`PR #560`: https://github.com/desihub/desitarget/pull/560
+
+0.33.3 (2019-10-31)
+-------------------
+
+* Add cuts for z = 4.3-4.8 quasar into the z5QSO selection [`PR #559`_].
+
+.. _`PR #559`: https://github.com/desihub/desitarget/pull/559
+
+0.33.2 (2019-10-17)
+-------------------
+
+* Add FIBERFLUX_IVAR_G/R/Z to mock skies when merging [`PR #556`_].
+* Fix minor bugs in `select_mock_targets` [`PR #555`_].
+* Update the ELG selections for SV [`PR #553`_]. Includes:
+    * Four new bit names:
+        * ``ELG_SV_GTOT``, ``ELG_SV_GFIB``.
+	* ``ELG_FDR_GTOT``, ``ELG_FDR_GFIB``.
+    * Associated new ELG selections with north/south differences.
+    * Propagate ``FIBERFLUX_G`` from the sweeps for SV ELG cuts.
+    * Increase the default sky densities by a factor of 4x.
+    * Relax CMX ``BACKUP_FAINT`` limit to G < 21 to test fiber assign.
+* Bright-end ``FIBERFLUX_R`` cut on ``BGS_FAINT_EXT`` in SV [`PR #552`_].
+* Update LRG selections for SV [`PR #550`_]. Includes:
+    * The zfibermag faint limit is changed from 21.6 to 21.9.
+    * IR-selected objects with r-W1>3.1 not subjected to the sliding cut.
+
+.. _`PR #550`: https://github.com/desihub/desitarget/pull/550
+.. _`PR #552`: https://github.com/desihub/desitarget/pull/552
+.. _`PR #553`: https://github.com/desihub/desitarget/pull/553
+.. _`PR #555`: https://github.com/desihub/desitarget/pull/555
+.. _`PR #556`: https://github.com/desihub/desitarget/pull/556
+
+0.33.1 (2019-10-13)
+-------------------
+
+* Enhancements and on-sky clean-up for SV and CMX [`PR #551`_]. Includes:
+    * Add areas contingent on ``MASKBITS`` to the ``pixweight-`` files.
+    * Change ``APFLUX`` to ``FIBERFLUX`` for skies and supp-skies.
+    * Add new M33 First Light program.
+    * Change priorities for the First Light programs.
+    * Retain Tycho, and sources with no measured proper motion, in GFAs.
+    * Add the ``REF_EPOCH`` column to all target files.
+
+.. _`PR #551`: https://github.com/desihub/desitarget/pull/551
+
+0.33.0 (2019-10-06)
+-------------------
+
+* Update skies, GFAs and CMX targets for all-sky observing [`PR #548`_]:
+    * Process and output GFAs, skies and CMX targets split by HEALPixel.
+    * "bundling" scripts to parallelize GFAs, skies, CMX by HEALPixel.
+    * Bundle across all HEALPixels (not just those in the footprint).
+    * Add pixel information to file headers for GFAs, skies and CMX.
+    * Write all-sky CMX targets separately from in-footprint targets.
+    * Add back-up and first light targets for commissioning.
+    * New TARGETID encoding scheme for Gaia-only and first light targets.
+    * Resolve commissioning targets from the Legacy Surveys.
+    * io.read functions can now process SKY and GFA target files.
+    * New function to read in targets restricted to a set of DESI tiles.
+    * Implement Boris Gaensicke's geographical cuts for Gaia.
+    * Update unit tests to use DR8 files.
+* Further updates to changes in `PR #531`_, [`PR #544`_]. Includes:
+    * A `--writeall` option to `select_secondary` writes a unified target
+      file without the BRIGHT/DARK split, as for `select_targets`
+    * Removes duplicate secondaries that arise from multiple matches to
+      one primary and secondary targets appearing in more than one input
+      file. The duplciate with highest `PRIORTIY_INIT` is retained.
+* Update mocks to match latest data-based targets catalogs [`PR #543`_].
+* Add new redshift 5 (``QSO_Z5``) SV QSO selection [`PR #539`_]. Also:
+    * Remove all Tycho and LSLGA sources from the GFA catalog.
+    * Minor improvements to documentation for secondary targets.
+    * Use N/S bricks for skies when S/N bricks aren't available.
+* Tune, high-z, faint (``QSO_HZ_F``) SV QSO selection [`PR #538`_]
+* Use ``SPECTYPE`` from ``zcat`` to set ``NUMOBS_MORE`` [`PR #537`_]:
+    * Updates behavior for tracer QSOs vs. LyA QSOs in MTL.
+* Update LRG selections for DR8 [`PR #532`_]. Includes:
+    * New LRG selection for SV with fewer bits.
+    * New ``LOWZ_FILLER`` class for SV.
+    * Add LRG 4PASS and 8PASS bits/classes using cuts on ``FLUX_Z``.
+    * New and simplified LRG selection for the Main Survey.
+    * Deprecate Main Survey 1PASS/2PASS LRGs, all LRGs now have one pass.
+    * Deprecate some very old code in :mod:`desitarget.targets`.
+* Finalize secondaries, add BRIGHT/DARK split [`PR #531`_]. Includes:
+    * Updated data model for secondaries.
+    * New secondary output columns (``OBSCONDITIONS``, proper motions).
+    * Add a cached file of primary TARGETIDs to prevent duplicates.
+    * Create a more reproducible TARGETID for secondaries.
+    * Automatically write secondaries split by BRIGHT/DARK.
+    * Add option to pass secondary file in MTL.
+    * Insist on observing layer/conditions for MTL:
+        * Ensures correct behavior for dark targets in bright time...
+	      * ...and bright-time targets observed in dark-time.
+    * Minor update to the ``MWS_BROAD`` class.
+* Add info on versioning, main_cmx_or_sv to bitmask notebook [`PR #527`_]
+
+.. _`PR #527`: https://github.com/desihub/desitarget/pull/527
+.. _`PR #531`: https://github.com/desihub/desitarget/pull/531
+.. _`PR #532`: https://github.com/desihub/desitarget/pull/532
+.. _`PR #537`: https://github.com/desihub/desitarget/pull/537
+.. _`PR #538`: https://github.com/desihub/desitarget/pull/538
+.. _`PR #539`: https://github.com/desihub/desitarget/pull/539
+.. _`PR #543`: https://github.com/desihub/desitarget/pull/543
+.. _`PR #544`: https://github.com/desihub/desitarget/pull/544
+.. _`PR #548`: https://github.com/desihub/desitarget/pull/548
+
+0.32.0 (2019-08-07)
+-------------------
+
+* Add URAT catalog information [`PR #526`_]. Includes:
+    * New module to retrieve URAT data from Vizier and reformat it.
+    * Code to match RAs/Decs to URAT, as part of that new URAT module.
+    * Substitute URAT PMs for GFAs where Gaia has not yet measured PMs.
+* Update CMX and Main Survey target classes [`PR #525`_]. Includes:
+    * New ``SV0_WD``, ``SV0_STD_FAINT`` target classes for commissioning.
+    * Mild updates to ``SV0_BGS`` and ``SV0_MWS`` for commissioning.
+    * New ``BGS_FAINT_HIP`` (high-priority BGS) Main Survey class.
+    * Explicit checking on ``ASTROMETRIC_PARAMS_SOLVED`` for MWS targets.
+    * Add 3-sigma parallax slop in ``MWS_MAIN`` survey target class.
+* Add ``OBSCONDITIONS`` to target files [`PR #523`_] Also includes:
+    * Split target files explicitly into bright and "graydark" surveys.
+    * Default to such a file-spilt for SV and Main (not for cmx).
+    * Adds an informational bit for supplemental sky locations.
+* Use ``MASKBITS`` instead of ``BRIGHTSTARINBLOB`` [`PR #521`_]. Also:
+    * Extra options and checks when making and vetting bundling scripts.
+    * Option to turn off commissioning QSO cuts to speed unit tests.
+* Add ELG/LRG/QSO/STD selection cuts for commissioning [`PR #519`_].
+* Add full set of columns to supplemental skies file [`PR #518`_].
+* Fix some corner cases when reading HEALPixel-split files [`PR #518`_].
+
+.. _`PR #518`: https://github.com/desihub/desitarget/pull/518
+.. _`PR #519`: https://github.com/desihub/desitarget/pull/519
+.. _`PR #521`: https://github.com/desihub/desitarget/pull/521
+.. _`PR #523`: https://github.com/desihub/desitarget/pull/523
+.. _`PR #525`: https://github.com/desihub/desitarget/pull/525
+.. _`PR #526`: https://github.com/desihub/desitarget/pull/526
+
+0.31.1 (2019-07-05)
+-------------------
+
+* Pass Gaia astrometric excess noise in cmx MWS SV0 [`PR #516`_].
+
+.. _`PR #516`: https://github.com/desihub/desitarget/pull/516
+
+0.31.0 (2019-06-30)
+-------------------
+
+* ``MASKBITS`` of ``BAILOUT`` for randoms when no file is found [`PR #515`_].
+* Near-trivial fix for an unintended change to the isELG API introduced in `PR
+  #513`_ [`PR #514`_].
+* Preliminary ELG cuts for DR8 imaging for main and SV [`PR #513`_].
+    * Don't deprecate wider SV bits, yet, ELGs may still need them.
+* Further updates to generating randoms for DR8. [`PR #512`_]. Includes:
+    * Add WISE depth maps to random catalogs and pixweight files.
+    * Code to generate additional supplemental randoms catalogs.
+        * Supplemental, here, means (all-sky) outside of the footprint.
+    * Executable to split a random catalog into N smaller catalogs.
+    * Fixes a bug in :func:`targets.main_cmx_or_sv()`.
+        * Secondary columns now aren't the default if rename is ``True``.
+    * Better aligns data model with expected DR8 directory structure.
+        * Also fixes directory-not-found bugs when generating skies.
+* Add "supplemental" (outside-of-footprint) skies [`PR #510`_]:
+    * Randomly populates sky area beyond some minimum Dec and Galactic b.
+    * Then avoids all Gaia sources at some specified radius.
+    * Fixes a bug where :func:`geomask.hp_in_box` used geodesics for Dec.
+        * Dec cuts should be small circles, not geodesics.
+* First implementation for secondary targets [`PR #507`_]. Includes:
+    * Framework and design for secondary targeting process.
+    * Works automatically for both Main Survey and SV files.
+    * New bitmasks for secondaries that populate ``SCND_TARGET`` column.
+        * can have any ``PRIORITY_INIT`` and ``NUMOBS_INIT``.
+    * A reserved "veto" bit to categorically reject targets.
+    * Rigorous checking of file formats...
+        * ...and that files correspond to secondary bits.
+    * Example files and file structure (at NERSC) in ``SCND_DIR``.
+        * /project/projectdirs/desi/target/secondary.
+    * Secondary targets are matched to primary targets on RA/Dec.
+        * unless a (per-source) ``OVERRIDE`` column is set to ``True``.
+    * Secondary-primary matches share the primary ``TARGETID``.
+    * Non-matches and overrides have their own ``TARGETID``.
+        * with ``RELEASE == 0``.
+    * Non-override secondary targets are also matched to themselves.
+        * ``TARGETID`` and ``SCND_TARGET`` correspond for matches.
+
+.. _`PR #507`: https://github.com/desihub/desitarget/pull/507
+.. _`PR #510`: https://github.com/desihub/desitarget/pull/510
+.. _`PR #512`: https://github.com/desihub/desitarget/pull/512
+.. _`PR #513`: https://github.com/desihub/desitarget/pull/513
+.. _`PR #514`: https://github.com/desihub/desitarget/pull/514
+.. _`PR #515`: https://github.com/desihub/desitarget/pull/515
+
+0.30.1 (2019-06-18)
+-------------------
+
+* Fix normalization bug in QSO tracer/Lya mock target densities [`PR #509`_].
+* Tune "Northern" QSO selection and color shifts for Main and SV [`PR #506`_]
+* Follow-up PR to `PR #496`_ with two changes and bug fixes [`PR #505`_]:
+    * Select QSO targets using random forest by default.
+    * Bug fix: Correctly populate ``REF_CAT`` column (needed to correctly set
+      MWS targeting bits).
+
+.. _`PR #505`: https://github.com/desihub/desitarget/pull/505
+.. _`PR #506`: https://github.com/desihub/desitarget/pull/506
+.. _`PR #509`: https://github.com/desihub/desitarget/pull/509
+
+0.30.0 (2019-05-30)
+-------------------
+
+* Drop Gaia fields with np.rfn to fix Python 3.6/macOS bug [`PR #502`_].
+* Apply the same declination cut to the mocks as to the data [`PR #501`_].
+* Add information to GFA files [`PR #498`_]. Includes:
+    * Add columns ``PARALLAX``, ``PARALLAX_IVAR``, ``REF_EPOCH``.
+    * Remove ``REF_EPOCH`` from GFA file header, as it's now a column.
+    * Sensible defaults for Gaia-only ``REF_EPOCH``, ``RA/DEC_IVAR``.
+    * Use fitsio.read() instead of :func:`desitarget.io.read_tractor()`.
+        * It's faster and special handling of input files isn't needed.
+* General clean-up of target selection code [`PR #497`_]. Includes:
+    * Deprecate old functions in :mod:`desitarget.gfa`.
+    * Greatly simplify :func:`io.read_tractor`.
+        * Backwards-compatability is now only guaranteed for DR6-8.
+    * Guard against warnings (e.g. divide-by-zero) in cuts and SV cuts.
+    * Default to only passing North (S) sources through North (S) cuts.
+        * Retain previous behavior if ``--noresolve`` flag is passed.
+* Add SV support to select_mock_targets [`PR #496`_]
+* A few more updates and enhancements for DR8 [`PR #494`_]. Includes:
+    * Add ``WISEMASK_W1`` and ``WISEMASK_W2`` to random catalogs.
+    * Deprecate ``BRIGHTBLOB`` in favor of ``MASKBITS`` for targets.
+    * Add ``qso_selection==colorcuts`` in :func:`set_target_bits.sv1_cuts`
+        * This should facilitate QSO selection for SV mocks.
+* Add ``REF_CAT`` and Gaia BP and RP mags and errors to GFAs [`PR #493`_].
+* Minor bug fix in how `select_mock_targets` handles Lya targets [`PR #444`_].
+* Further updates and enhancements for DR8 [`PR #490`_]. Includes:
+    * Resolve sky locations and SV targets in North/South regions.
+    * Update sky and SV slurming for DR8-style input (two directories).
+    * Write both of two input directories to output file headers.
+    * Parallelize plot production to speed-up QA by factors of 8.
+    * Add ``PSFSIZE`` to randoms, pixweight maps and QA plots.
+    * QA and pixweight maps work fully for SV-style files and bits.
+    * Pixweight code can now take HEALpixel-split targets as input.
+    * Add aperture-photometered background flux to randoms catalogs.
+    * Additional unit test module (:func:`test.test_geomask`).
+    * Deprecate `make_hpx_density_file`; use `make_imaging_weight_map`.
+    * :func:`io.read_targets_in_a_box` can now read headers.
+    * Update unit test data for new DR8 columns and functionality.
+* Update QSO targeting algorithms for DR8 [`PR #489`_]. Includes:
+    * Update baseline quasar selection for the main survey.
+    * Update QSO bits and selection algorithms for SV.
+* Remove GFA/Gaia duplicates on ``REF_ID`` not ``BRICKID`` [`PR #488`_].
+* Various bug and feature fixes [`PR #484`_]. Includes:
+    * Fix crash when using sv_select_targets with `--tcnames`.
+    * Only import matplotlib where explicitly needed.
+* Update `select_mock_targets` to (current) DR8 data model [`PR #480`_].
+
+.. _`PR #444`: https://github.com/desihub/desitarget/pull/444
+.. _`PR #480`: https://github.com/desihub/desitarget/pull/480
+.. _`PR #484`: https://github.com/desihub/desitarget/pull/484
+.. _`PR #488`: https://github.com/desihub/desitarget/pull/488
+.. _`PR #489`: https://github.com/desihub/desitarget/pull/489
+.. _`PR #490`: https://github.com/desihub/desitarget/pull/490
+.. _`PR #493`: https://github.com/desihub/desitarget/pull/493
+.. _`PR #494`: https://github.com/desihub/desitarget/pull/494
+.. _`PR #496`: https://github.com/desihub/desitarget/pull/496
+.. _`PR #497`: https://github.com/desihub/desitarget/pull/497
+.. _`PR #498`: https://github.com/desihub/desitarget/pull/498
+.. _`PR #501`: https://github.com/desihub/desitarget/pull/501
+.. _`PR #502`: https://github.com/desihub/desitarget/pull/502
+
+0.29.1 (2019-03-26)
+-------------------
+
+* Add ``REF_CAT``, ``WISEMASK_W1/W2`` to DR8 data model [`PR #479`_].
+* Use speed of light from scipy [`PR #478`_].
+
+.. _`PR #478`: https://github.com/desihub/desitarget/pull/478
+.. _`PR #479`: https://github.com/desihub/desitarget/pull/479
+
+0.29.0 (2019-03-22)
+-------------------
+
+* Update SV selection for DR8 [`PR #477`_]. Includes:
+    * New SV targeting bits for QSOs and LRGs.
+    * New SV selection algorithms for QSOs, ELGs and LRGs.
+    * MTL fixes to handle SV LRGs (which are now not 1PASS/2PASS).
+    * QA can now interpret HEALPixel-split targeting files.
+    * Updated test files for the quasi-DR8 imaging data model.
+    * SKY and BAD_SKY added to commissioning bits yaml file.
+    * Randoms in overlap regions, and for DR8 dual directory structure.
+    * Write overlap regions in addition to resolve for targets/randoms.
+* Change instances of `yaml.load` to `yaml.safe_load` [`PR #475`_].
+* Fix Gaia files format in doc string (healpix not healpy) [`PR #474`_].
+* Write Gaia morphologies and allow custom tilings for GFAs [`PR #467`_].
+* Initial updates for DR8 [`PR #466`_]. Includes:
+    * DR8 data model updates (e.g BRIGHTSTARBLOB -> bitmask BRIGHTBLOB).
+    * Apply resolve capability to targets and randoms.
+    * Handle BASS/MzLS and DECaLS existing in the same input directory.
+* New resolve capability for post-DR7 imaging [`PR #462`_]. Includes:
+    * Add ``RELEASE`` to GFA data model to help resolve duplicates.
+    * Resolve N/S duplicates by combining ``RELEASE`` and areal cuts.
+    * Apply the new resolve code (:func:`targets.resolve`) to GFAs.
+    * Deprecate Gaia-matching code for GFAs, as we no longer need it.
+* Add code to select GFAs for cmx across wider sky areas [`PR #461`_].
+
+.. _`PR #461`: https://github.com/desihub/desitarget/pull/461
+.. _`PR #462`: https://github.com/desihub/desitarget/pull/462
+.. _`PR #466`: https://github.com/desihub/desitarget/pull/466
+.. _`PR #467`: https://github.com/desihub/desitarget/pull/467
+.. _`PR #474`: https://github.com/desihub/desitarget/pull/474
+.. _`PR #475`: https://github.com/desihub/desitarget/pull/475
+.. _`PR #477`: https://github.com/desihub/desitarget/pull/477
+
+0.28.0 (2019-02-28)
+-------------------
+
+* `desitarget.mock.build.targets_truth` fixes for new priority calcs [`PR #460`_].
+* Updates to GFAs and skies for some cmx issues [`PR #459`_]. Includes:
+    * Assign ``BADSKY`` using ``BLOBDIST`` rather than aperture fluxes.
+    * Increase default density at which sky locations are generated.
+    * Store only aperture fluxes that match the DESI fiber radius.
+    * Ensure GFAs exist throughout the spectroscopic footprint.
+* Refactor SV/main targeting for spatial queries [`PR #458`_]. Includes:
+    * Many new spatial query capabilities in :mod:`desitarget.geomask`.
+    * Parallelize target selection by splitting across HEALPixels.
+    * Wrappers to read in HEALPix-split target files split by:
+        * HEALPixels, RA/Dec boxes, RA/Dec/radius caps, column names.
+    * Only process subsets of targets in regions of space, again including:
+        * HEALPixels, RA/Dec boxes, RA/Dec/radius caps.
+    * New unit tests to check these spatial queries.
+    * Updated notebook including tutorials on spatial queries.
+* Update the SV selections for BGS [`PR #457`_].
 * Update MTL to work for SV0-like cmx and SV1 tables [`PR #456`_]. Includes:
     * Make SUBPRIORITY a random number (0->1) in skies output.
     * New :func:`targets.main_cmx_or_sv` to parse flavor of survey.
@@ -21,6 +492,10 @@ desitarget Change Log
 .. _`PR #449`: https://github.com/desihub/desitarget/pull/449
 .. _`PR #452`: https://github.com/desihub/desitarget/pull/452
 .. _`PR #456`: https://github.com/desihub/desitarget/pull/456
+.. _`PR #457`: https://github.com/desihub/desitarget/pull/457
+.. _`PR #458`: https://github.com/desihub/desitarget/pull/458
+.. _`PR #459`: https://github.com/desihub/desitarget/pull/459
+.. _`PR #460`: https://github.com/desihub/desitarget/pull/460
 
 0.27.0 (2018-12-14)
 -------------------
@@ -51,8 +526,8 @@ desitarget Change Log
     * New function :func:`targets.calc_priority_no_table` to use less memory.
     * Set informational (`NORTH/SOUTH`) bits to 0 `PRIORITY` and `NUMOBS`.
     * Set priorities using `LRG_1PASS/2PASS` bits rather than on `LRG`.
-* Minor updates to `select_mock_targets` [`PR #425`_].  
-    * Use pre-computed template photometry (requires `v3.1` basis templates). 
+* Minor updates to `select_mock_targets` [`PR #425`_].
+    * Use pre-computed template photometry (requires `v3.1` basis templates).
     * Include MW dust extinction in the spectra.
     * Randomly assign a radial velocity to superfaint mock targets.
 * Update default mock catalogs used by `select_mock_targets` [`PR #424`_]
@@ -252,7 +727,6 @@ bit names and selection function names.
 
 .. _`PR #334`: https://github.com/desihub/desitarget/pull/334
 
-
 0.21.0 (2018-07-18)
 -------------------
 
@@ -321,7 +795,6 @@ bit names and selection function names.
 .. _`PR #329`: https://github.com/desihub/desitarget/pull/329
 .. _`PR #331`: https://github.com/desihub/desitarget/pull/331
 .. _`PR #332`: https://github.com/desihub/desitarget/pull/332
-
 
 0.20.1 (2018-03-29)
 -------------------
