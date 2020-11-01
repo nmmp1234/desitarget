@@ -950,6 +950,103 @@ def isQSOz5_colors(gflux=None, rflux=None, zflux=None,
     return qso
 
 
+def isQSOred_cuts(gflux=None, rflux=None, zflux=None,
+                 gsnr=None, rsnr=None, zsnr=None,
+                 gnobs=None, rnobs=None, znobs=None,
+                 w1flux=None, w2flux=None, w3flux=None, w1snr=None, w2snr=None, w3snr=None,
+                 dchisq=None, maskbits=None, objtype=None, primary=None,
+                 south=True):
+    """Definition of reddened QSO targets from color and WISE cuts. Returns a boolean array.
+    Parameters
+    ----------
+    south : :class:`boolean`, defaults to ``True``
+        Use cuts appropriate to the Northern imaging surveys (BASS/MzLS) if ``south=False``,
+        otherwise use cuts appropriate to the Southern imaging survey (DECaLS).
+    Returns
+    -------
+    :class:`array_like`
+        ``True`` for objects that pass the quasar color/morphology/logic cuts.
+
+    """
+    if not south:
+        gflux, rflux, zflux = shift_photo_north(gflux, rflux, zflux)
+
+    if primary is None:
+        primary = np.ones_like(rflux, dtype='?')
+    qso = primary.copy()
+
+    # VAF not sure about maskbits
+    
+    # VAF observed in every band.
+    qso &= (gnobs > 0) & (rnobs > 0) & (znobs > 0)
+
+    # VAF keeping these for now
+    # ADM relaxed morphology cut for SV.
+    # ADM we never target sources with dchisq[..., 0] = 0, so force
+    # ADM those to have large values of morph2 to avoid divide-by-zero.
+    d1, d0 = dchisq[..., 1], dchisq[..., 0]
+    bigmorph = np.zeros_like(d0)+1e9
+    dcs = np.divide(d1 - d0, d0, out=bigmorph, where=d0 != 0)
+    morph2 = dcs < 0.005
+    
+    # VAF ensure point-like objects
+    qso &= _psflike(objtype) | morph2
+
+    # VAF apply WISE SNR cuts
+    qso &= w1snr > 3
+    qso &= w2snr > 3
+    qso &= w3snr > 3
+    
+    # VAF apply WISE Mateos+2012 AGN wedge to remove non-QSO contaminants
+    qso &= (np.log10(w2flux/w1flux)<0.315*np.log10(w3f/w2f)+0.297)&(np.log10(w2flux/w1flux)>0.315*np.log10(w3flux/w2flux)-0.11)&(np.log10(w3flux/w2flux)>(np.log10(w2flux/w1flux)-0.436)/-3.172)
+
+    # VAF perform the color cuts to finish the selection.
+    qso &= isQSOred_colors(gflux=gflux, rflux=rflux, zflux=zflux,
+                          gsnr=gsnr, rsnr=rsnr, zsnr=zsnr,
+                          w1flux=w1flux, w2flux=w2flux, w3flux=w3flux,
+                          primary=primary, south=south)
+
+    return qso
+
+
+def isQSOred_colors(gflux=None, rflux=None, zflux=None,gsnr=None, rsnr=None, zsnr=None,w1flux=None, w2flux=None, w3flux=None, primary=None, south=True):
+    """Color cut to select reddened quasar targets.
+    (See :func:`~desitarget.sv1.sv1_cuts.isQSOred_cuts`).
+    """
+    if primary is None:
+        primary = np.ones_like(rflux, dtype='?')
+    qso = primary.copy()
+
+    # VAF keep for now
+    # ADM never target sources that are far too bright (mag < 0).
+    # ADM this guards against overflow warnings in powers.
+    qso &= (gflux < 1e9) & (rflux < 1e9) & (zflux < 1e9)
+    gflux[~qso] = 1e9
+    rflux[~qso] = 1e9
+    zflux[~qso] = 1e9
+
+    # VAF never target sources with negative W1, W2, W3, g, r or z fluxes.
+    qso &= (w1flux >= 0.) & (w2flux >= 0.) & (w3flux >= 0.) & (gflux >= 0.) & (rflux >= 0.) & (zflux >= 0.)
+    w1flux[~qso] = 0.
+    w2flux[~qso] = 0.
+    w3flux[~qso] = 0.
+    gflux[~qso] = 0.
+    rflux[~qso] = 0.
+    zflux[~qso] = 0.
+
+    # VAF r-band magnitude limit < 23.
+    # VAF same as QSO SV cut
+    qso &= rflux > 10**((22.5-23.)/2.5)     # r<23
+
+    # VAF remove sources within the main QSO colour-cut
+    # (g-r)<1.3 & (r-z)>-0.4 & (r-z)<1.1
+    # VAF this removes the chance of re-observing a blue QSO
+    colour_cut = np.where((r-z<1.1)&(g-r<1.3)&(r-z>-0.4),False,True)
+    qso=np.logical_and(qso,colour_cut)
+    
+    return qso
+
+
 def isBGS(gflux=None, rflux=None, zflux=None, w1flux=None, w2flux=None, rfiberflux=None,
           gnobs=None, rnobs=None, znobs=None, gfracmasked=None, rfracmasked=None, zfracmasked=None,
           gfracflux=None, rfracflux=None, zfracflux=None, gfracin=None, rfracin=None, zfracin=None,
