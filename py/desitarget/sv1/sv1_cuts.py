@@ -1580,11 +1580,22 @@ def set_target_bits(photsys_north, photsys_south, obs_rflux,
                     w1flux=w1flux, w2flux=w2flux, w1snr=w1snr, w2snr=w2snr,
                     dchisq=dchisq, maskbits=maskbits, objtype=objtype,
                     south=south
+                    
+             qso_store.append(
+                isQSOred_cuts(
+                    primary=primary, gflux=gflux, rflux=rflux, zflux=zflux,
+                    gsnr=gsnr, rsnr=rsnr, zsnr=zsnr,
+                    gnobs=gnobs, rnobs=rnobs, znobs=znobs,
+                    w1flux=w1flux, w2flux=w2flux, w3flux=w3flux, w1snr=w1snr, w2snr=w2snr, w3snr=w3snr,
+                    dchisq=dchisq, maskbits=maskbits, objtype=objtype,
+                    south=south
+                )
+            )
                 )
             )
             qso_classes[int(south)] = qso_store
-    qsocolor_north, qsorf_north, qsohizf_north, qsocolor_high_z_north, qsoz5_north = qso_classes[0]
-    qsocolor_south, qsorf_south, qsohizf_south, qsocolor_high_z_south, qsoz5_south = qso_classes[1]
+    qsocolor_north, qsorf_north, qsohizf_north, qsocolor_high_z_north, qsoz5_north, qsored_north = qso_classes[0]
+    qsocolor_south, qsorf_south, qsohizf_south, qsocolor_high_z_south, qsoz5_south, qsored_south = qso_classes[1]
 
     # ADM combine quasar target bits for a quasar target based on any imaging.
     qsocolor_highz_north = (qsocolor_north & qsocolor_high_z_north)
@@ -1592,14 +1603,14 @@ def set_target_bits(photsys_north, photsys_south, obs_rflux,
     qsocolor_lowz_north = (qsocolor_north & ~qsocolor_high_z_north)
     qsorf_lowz_north = (qsorf_north & ~qsocolor_high_z_north)
     qso_north = (qsocolor_lowz_north | qsorf_lowz_north | qsocolor_highz_north
-                 | qsorf_highz_north | qsohizf_north | qsoz5_north)
+                 | qsorf_highz_north | qsohizf_north | qsoz5_north | qsored_north)
 
     qsocolor_highz_south = (qsocolor_south & qsocolor_high_z_south)
     qsorf_highz_south = (qsorf_south & qsocolor_high_z_south)
     qsocolor_lowz_south = (qsocolor_south & ~qsocolor_high_z_south)
     qsorf_lowz_south = (qsorf_south & ~qsocolor_high_z_south)
     qso_south = (qsocolor_lowz_south | qsorf_lowz_south | qsocolor_highz_south
-                 | qsorf_highz_south | qsohizf_south | qsoz5_south)
+                 | qsorf_highz_south | qsohizf_south | qsoz5_south | qsored_south)
 
     qso = (qso_north & photsys_north) | (qso_south & photsys_south)
     qsocolor_highz = (qsocolor_highz_north & photsys_north) | (qsocolor_highz_south & photsys_south)
